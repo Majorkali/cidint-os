@@ -20,27 +20,31 @@ jobs:
 
   iso-amd64:
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 240
+    # Build inside Debian 13 itself: no dependency on the runner's own packages.
+    container:
+      image: debian:trixie
+      options: --privileged -v /:/host
     steps:
       - uses: actions/checkout@v4
-      - name: Free disk space
+      - name: Free disk space on the runner
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          sudo docker image prune -af || true
+          rm -rf /host/usr/share/dotnet /host/usr/local/lib/android /host/opt/ghc                  /host/opt/hostedtoolcache /host/usr/share/swift /host/usr/local/.ghcup
           df -h /
       - name: Build
         shell: bash
         run: |
           set -o pipefail
-          sudo CIDINT_ARCH=amd64 CIDINT_OUT="$PWD/out" bash build.sh 2>&1 | tee console.log
+          CIDINT_ARCH=amd64 CIDINT_OUT="$PWD/out" bash build.sh 2>&1 | tee console.log
       - name: Publish the failure output
         if: failure()
+        shell: bash
         run: |
           mkdir -p out
           cp console.log out/console-amd64.log || true
-          sudo sh -c 'cp /var/tmp/cidint-build/builder/build/build.log out/build-amd64.log 2>/dev/null || cp /var/tmp/cidint-build/src/build.log out/build-amd64.log 2>/dev/null || true'
-          sudo chmod -R a+r out || true
+          cp /var/tmp/cidint-build/src/build.log out/build-amd64.log 2>/dev/null || true
+          command -v python3 >/dev/null || apt-get install -y python3 >/dev/null 2>&1 || true
           python3 tools/ci-annotate.py console.log 4 40
       - uses: actions/upload-artifact@v4
         if: always()

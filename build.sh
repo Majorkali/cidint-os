@@ -96,7 +96,7 @@ ISO="$RESULT/cidint-os-$ARCH.iso"
 SIZE=$(stat -c %s "$ISO")
 [ "$SIZE" -le "$MAX_BYTES" ] || die "ISO is $((SIZE / 1048576)) MB, over the 15 GB limit"
 mkdir -p "$OUT"
-cp "$ISO" "$OUT/"
+mv "$ISO" "$OUT/"   # move, not copy: the image is several GB
 cp "$RESULT/build.log" "$OUT/build-$ARCH.log" 2>/dev/null || true
 ( cd "$OUT" && sha256sum "cidint-os-$ARCH.iso" > "cidint-os-$ARCH.iso.sha256" )
 log "done: $OUT/cidint-os-$ARCH.iso ($((SIZE / 1048576)) MB)"
