@@ -1,0 +1,72 @@
+# CIDINT OS core packages. Every name here must exist in Debian 13 (trixie):
+# a missing package aborts the build. Anything less certain goes in
+# includes.chroot/usr/share/cidint/optional-packages.list instead.
+
+# --- desktop ---
+kde-plasma-desktop
+sddm
+plasma-nm
+plasma-pa
+konsole
+dolphin
+kate
+ark
+kdialog
+firefox-esr
+pipewire-audio
+xdg-utils
+fonts-noto-core
+
+# --- base system ---
+sudo
+polkitd
+pkexec
+network-manager
+ca-certificates
+curl
+python3
+python3-pyqt6
+zram-tools
+power-profiles-daemon
+
+# --- security and privacy ---
+apparmor
+apparmor-utils
+apparmor-profiles
+nftables
+tor
+torsocks
+bubblewrap
+cryptsetup
+gnupg
+clamav
+wireguard-tools
+openssh-client
+
+# --- application compatibility ---
+flatpak
+podman
+distrobox
+alien
+rpm
+fakeroot
+
+# --- storage ---
+btrfs-progs
+ntfs-3g
+exfatprogs
+dosfstools
+e2fsprogs
+
+# --- hardware support ---
+firmware-linux-free
+firmware-linux
+firmware-iwlwifi
+firmware-realtek
+firmware-atheros
+firmware-misc-nonfree
+
+# --- development basics ---
+build-essential
+git
+python3-venv

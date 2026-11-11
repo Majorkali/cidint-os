@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=CIDINT Control Center
+GenericName=Security Dashboard
+Comment=Security posture, anonymity, domains, applications and hardware
+Exec=/usr/bin/cidint center
+Icon=security-high
+Categories=System;Security;Settings;
+Keywords=security;tor;anonymous;firewall;sandbox;hardware;
+StartupNotify=true

@@ -1,0 +1,26 @@
+#!/bin/sh
+# live-build configuration for CIDINT OS. Run through `lb config`.
+set -e
+
+ARCH="${CIDINT_ARCH:-amd64}"
+
+# Kernel hardening applied on every boot:
+#   slab_nomerge, init_on_alloc/free (memory zeroed on allocation and on free,
+#   which also wipes RAM contents as they are released), page allocator
+#   randomisation, kernel stack offset randomisation, no legacy vsyscalls.
+HARDEN="slab_nomerge init_on_alloc=1 init_on_free=1 page_alloc.shuffle=1 randomize_kstack_offset=on vsyscall=none"
+
+lb config noauto \
+    --distribution trixie \
+    --architectures "$ARCH" \
+    --archive-areas "main contrib non-free non-free-firmware" \
+    --binary-images iso-hybrid \
+    --debian-installer none \
+    --apt-recommends true \
+    --memtest none \
+    --image-name cidint-os \
+    --iso-application "CIDINT OS" \
+    --iso-publisher "CIDINT OS Project" \
+    --iso-volume "CIDINT_OS" \
+    --bootappend-live "boot=live components quiet splash username=cidint hostname=cidint $HARDEN" \
+    "${@}"

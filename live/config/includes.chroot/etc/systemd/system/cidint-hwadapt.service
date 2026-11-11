@@ -1,0 +1,25 @@
+[Unit]
+Description=CIDINT hardware adaptation engine
+After=multi-user.target power-profiles-daemon.service
+
+[Service]
+ExecStart=/usr/bin/cidint hw daemon
+Restart=on-failure
+RestartSec=5
+Nice=10
+RuntimeDirectory=cidint
+RuntimeDirectoryPreserve=yes
+RuntimeDirectoryMode=0755
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryMax=96M
+
+[Install]
+WantedBy=multi-user.target

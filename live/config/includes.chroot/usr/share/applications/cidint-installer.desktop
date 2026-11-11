@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=CIDINT Installer
+GenericName=Universal Application Engine
+Comment=Identify, scan, isolate and install software from any supported ecosystem
+Exec=/usr/bin/cidint app open %f
+Icon=system-software-install
+Categories=System;PackageManager;
+NoDisplay=true
+MimeType=application/vnd.debian.binary-package;application/x-deb;application/x-rpm;application/x-redhat-package-manager;application/vnd.appimage;application/x-iso9660-appimage;application/x-ms-dos-executable;application/x-msdownload;application/vnd.microsoft.portable-executable;application/x-msi;application/x-ms-installer;application/x-bat;application/x-msdos-program;application/vnd.android.package-archive;application/vnd.flatpak;application/vnd.flatpak.ref;application/vnd.snap;application/x-java-archive;application/x-apple-diskimage;application/x-powershell;

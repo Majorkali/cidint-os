@@ -1,0 +1,5 @@
+# CIDINT OS: compressed swap in RAM. Nothing is ever swapped to disk, so no
+# plaintext memory pages are left on storage.
+ALGO=zstd
+PERCENT=50
+PRIORITY=100

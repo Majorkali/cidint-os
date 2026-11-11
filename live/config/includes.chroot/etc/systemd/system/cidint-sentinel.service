@@ -1,0 +1,29 @@
+[Unit]
+Description=CIDINT Sentinel behavioural threat detection
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/cidint sentinel daemon
+Restart=on-failure
+RestartSec=5
+Nice=10
+RuntimeDirectory=cidint
+RuntimeDirectoryPreserve=yes
+RuntimeDirectoryMode=0755
+LogsDirectory=cidint
+CapabilityBoundingSet=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_KILL
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

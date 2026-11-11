@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="3840" height="2160" viewBox="0 0 3840 2160">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#05080f"/>
+      <stop offset="0.55" stop-color="#0a1222"/>
+      <stop offset="1" stop-color="#0f1b33"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0.72" cy="0.36" r="0.55">
+      <stop offset="0" stop-color="#35e0c8" stop-opacity="0.30"/>
+      <stop offset="0.45" stop-color="#35e0c8" stop-opacity="0.07"/>
+      <stop offset="1" stop-color="#35e0c8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0.18" cy="0.85" r="0.5">
+      <stop offset="0" stop-color="#7a5cff" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#7a5cff" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="hex" width="120" height="208" patternUnits="userSpaceOnUse">
+      <path d="M60 0 L120 35 L120 104 L60 139 L0 104 L0 35 Z M60 139 L60 208 M0 104 L0 35 M120 104 L120 35"
+            fill="none" stroke="#9fc4ff" stroke-opacity="0.045" stroke-width="2"/>
+    </pattern>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#35e0c8"/>
+      <stop offset="1" stop-color="#4aa8ff"/>
+    </linearGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#fff" stop-opacity="1"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="m"><rect width="3840" height="2160" fill="url(#fade)"/></mask>
+  </defs>
+  <rect width="3840" height="2160" fill="url(#bg)"/>
+  <rect width="3840" height="2160" fill="url(#hex)" mask="url(#m)"/>
+  <rect width="3840" height="2160" fill="url(#glowA)"/>
+  <rect width="3840" height="2160" fill="url(#glowB)"/>
+  <g transform="translate(2765 780)" fill="none" stroke="url(#ring)">
+    <circle r="430" stroke-width="2" stroke-opacity="0.22"/>
+    <circle r="330" stroke-width="3" stroke-opacity="0.35" stroke-dasharray="6 22"/>
+    <circle r="236" stroke-width="2" stroke-opacity="0.5"/>
+    <path d="M0 -168 L146 -84 L146 84 L0 168 L-146 84 L-146 -84 Z" stroke-width="7" stroke-opacity="0.95"/>
+    <path d="M0 -96 L83 -48 L83 48 L0 96 L-83 48 L-83 -48 Z" stroke-width="4" stroke-opacity="0.6"/>
+    <circle r="16" fill="#35e0c8" stroke="none"/>
+    <path d="M0 -168 L0 -236 M146 84 L204 118 M-146 84 L-204 118" stroke-width="4" stroke-opacity="0.7"/>
+  </g>
+  <g font-family="Inter, 'Noto Sans', sans-serif" fill="#dfe9f5">
+    <text x="300" y="1760" font-size="150" font-weight="700" letter-spacing="26">CIDINT<tspan fill="#35e0c8"> OS</tspan></text>
+    <text x="306" y="1850" font-size="44" fill="#8fa3bd" letter-spacing="9">SECURE  ·  ANONYMOUS  ·  INTELLIGENT  ·  ADAPTIVE</text>
+  </g>
+</svg>

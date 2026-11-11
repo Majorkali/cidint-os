@@ -1,0 +1,106 @@
+# Optional packages: installed one by one during the build; a package that does
+# not exist for this release or architecture is skipped and recorded in
+# /usr/share/cidint/optional-missing.txt instead of failing the build.
+
+# --- anonymity and privacy tools ---
+torbrowser-launcher
+obfs4proxy
+onionshare-cli
+mat2
+keepassxc
+kleopatra
+age
+bleachbit
+secure-delete
+openvpn
+network-manager-openvpn
+
+# --- authentication and platform security ---
+libpam-u2f
+fido2-tools
+yubikey-manager
+tpm2-tools
+systemd-cryptsetup
+mokutil
+sbsigntool
+fwupd
+firejail
+chkrootkit
+rkhunter
+lynis
+auditd
+
+# --- Windows / foreign-architecture / Android compatibility ---
+wine
+wine64
+winetricks
+qemu-user
+qemu-user-binfmt
+qemu-user-static
+default-jre
+libfuse2t64
+waydroid
+snapd
+
+# --- virtual machines ---
+qemu-system-x86
+qemu-system-arm
+qemu-system-gui
+qemu-utils
+ovmf
+libvirt-daemon-system
+virt-manager
+
+# --- hardware ---
+intel-microcode
+amd64-microcode
+thermald
+firmware-intel-graphics
+firmware-amd-graphics
+firmware-nvidia-graphics
+firmware-mediatek
+firmware-brcm80211
+firmware-sof-signed
+mesa-vulkan-drivers
+bluez
+
+# --- storage ---
+lvm2
+mdadm
+xfsprogs
+f2fs-tools
+hfsprogs
+partitionmanager
+
+# --- network analysis ---
+nmap
+tcpdump
+wireshark
+
+# --- development ---
+clang
+cmake
+meson
+ninja-build
+gdb
+golang
+rustc
+cargo
+nodejs
+npm
+default-jdk-headless
+python3-pip
+kubernetes-client
+
+# --- desktop extras ---
+plasma-systemmonitor
+kde-spectacle
+okular
+gwenview
+kcalc
+plymouth
+plymouth-themes
+fonts-inter
+fonts-jetbrains-mono
+fonts-noto-color-emoji
+orca
