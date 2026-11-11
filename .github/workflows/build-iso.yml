@@ -30,12 +30,21 @@ jobs:
           sudo docker image prune -af || true
           df -h /
       - name: Build
-        run: sudo CIDINT_ARCH=amd64 CIDINT_OUT="$PWD/out" bash build.sh
-      - name: Keep the build log if the build failed
+        run: sudo CIDINT_ARCH=amd64 CIDINT_OUT="$PWD/out" bash build.sh 2>&1 | tee console.log
+      - name: Publish the failure output
         if: failure()
         run: |
           mkdir -p out
+          cp console.log out/console-amd64.log || true
           sudo sh -c 'cp /var/tmp/cidint-build/builder/build/build.log out/build-amd64.log 2>/dev/null || cp /var/tmp/cidint-build/src/build.log out/build-amd64.log 2>/dev/null || true'
+          sudo chmod -R a+r out || true
+          # annotations are readable without signing in, unlike the raw log
+          for part in 1 2 3; do
+            start=$(( (3 - part) * 45 + 45 ))
+            msg=$(tail -n "$start" console.log | head -n 45 | sed 's/\[[0-9;]*m//g' | cut -c1-300 | sed ':a;N;$!ba;s/%/%25/g;s///g;s/
+/%0A/g')
+            echo "::error title=build output part $part of 3::$msg"
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
