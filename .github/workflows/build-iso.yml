@@ -30,7 +30,10 @@ jobs:
           sudo docker image prune -af || true
           df -h /
       - name: Build
-        run: sudo CIDINT_ARCH=amd64 CIDINT_OUT="$PWD/out" bash build.sh 2>&1 | tee console.log
+        shell: bash
+        run: |
+          set -o pipefail
+          sudo CIDINT_ARCH=amd64 CIDINT_OUT="$PWD/out" bash build.sh 2>&1 | tee console.log
       - name: Publish the failure output
         if: failure()
         run: |
