@@ -38,13 +38,7 @@ jobs:
           cp console.log out/console-amd64.log || true
           sudo sh -c 'cp /var/tmp/cidint-build/builder/build/build.log out/build-amd64.log 2>/dev/null || cp /var/tmp/cidint-build/src/build.log out/build-amd64.log 2>/dev/null || true'
           sudo chmod -R a+r out || true
-          # annotations are readable without signing in, unlike the raw log
-          for part in 1 2 3; do
-            start=$(( (3 - part) * 45 + 45 ))
-            msg=$(tail -n "$start" console.log | head -n 45 | sed 's/\[[0-9;]*m//g' | cut -c1-300 | sed ':a;N;$!ba;s/%/%25/g;s///g;s/
-/%0A/g')
-            echo "::error title=build output part $part of 3::$msg"
-          done
+          python3 tools/ci-annotate.py console.log 4 40
       - uses: actions/upload-artifact@v4
         if: always()
         with:
