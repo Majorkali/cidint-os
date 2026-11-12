@@ -258,29 +258,12 @@ class Assistant(unittest.TestCase):
 
 
 class BootMenus(unittest.TestCase):
-    GRUB = ('set theme=x
-menuentry "Live system (amd64)" --hotkey=l {
-'
-            '	linux	/live/vmlinuz-6.12 boot=live components quiet
-'
-            '	initrd	/live/initrd.img-6.12
-}
-menuentry "Other" {
-	chainloader x
-}
-')
-    SYSLINUX = ("label live-amd64
-	menu label ^Live system (amd64)
-	menu default
-"
-                "	linux /live/vmlinuz
-	initrd /live/initrd.img
-	append boot=live components quiet
-"
-                "
-label other
-	kernel x
-")
+    GRUB = "\n".join(['set theme=x', 'menuentry "Live system (amd64)" --hotkey=l {',
+                      '    linux /live/vmlinuz-6.12 boot=live components quiet',
+                      '    initrd /live/initrd.img-6.12', '}', 'menuentry "Other" {', '    chainloader x', '}', ''])
+    SYSLINUX = "\n".join(['label live-amd64', '    menu label ^Live system (amd64)', '    menu default',
+                          '    linux /live/vmlinuz', '    initrd /live/initrd.img',
+                          '    append boot=live components quiet', '', 'label other', '    kernel x', ''])
 
     def test_grub(self):
         out = patch_bootloaders.patch_grub(self.GRUB)
@@ -299,15 +282,11 @@ label other
         self.assertEqual(patch_bootloaders.patch_syslinux(out), out)
 
     def test_rebrand(self):
-        out = patch_bootloaders.rebrand('text = "Debian GNU/Linux 13 (trixie) amd64"
-Live system (amd64)')
-        self.assertEqual(out, 'text = "CIDINT OS 0.1"
-CIDINT OS (amnesic) (amd64)')
+        out = patch_bootloaders.rebrand('text = "Debian GNU/Linux 13 (trixie) amd64"' + chr(10) + 'Live system (amd64)')
+        self.assertEqual(out, 'text = "CIDINT OS 0.1"' + chr(10) + 'CIDINT OS (amnesic) (amd64)')
 
     def test_unknown_template_untouched(self):
-        self.assertEqual(patch_bootloaders.patch_grub("set timeout=5
-"), "set timeout=5
-")
+        self.assertEqual(patch_bootloaders.patch_grub("set x=5"), "set x=5")
 
 
 class ShippedFiles(unittest.TestCase):
