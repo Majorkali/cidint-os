@@ -74,8 +74,10 @@ def decide(*, load_forecast: float, cpu_pressure: float, temp_c: float,
         return "balanced", "on battery"
     if temp_c >= 80:
         return "balanced", f"running hot ({temp_c:.0f} C)"
-    if load_forecast >= 0.60 or cpu_pressure >= 20:
+    if load_forecast >= 0.60:
         return "performance", f"high demand forecast ({load_forecast:.0%})"
+    if cpu_pressure >= 20:
+        return "performance", f"tasks waiting for CPU (pressure {cpu_pressure:.0f}%)"
     return "balanced", "light load"
 
 
@@ -247,6 +249,8 @@ def daemon() -> None:
         wanted, reason = decide(load_forecast=forecast.forecast(), cpu_pressure=pressure("cpu"),
                                 temp_c=temp, on_ac=on_ac, battery_pct=batt)
         profile = switch.propose(wanted)
+        if profile != wanted:
+            reason = f"holding; {wanted} requested ({reason})"
         if profile != applied and apply_profile(profile):
             applied = profile
         now_disks = {os.path.basename(b) for b in glob.glob("/sys/block/*")

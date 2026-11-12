@@ -11,10 +11,12 @@ the hardware it finds.
 
 This folder is the complete source of the OS and the system that builds its ISO.
 
-> **Status: version 0.1, source complete, ISO not yet built or boot-tested.**
-> The core logic is covered by automated tests (`tests/`), but the image has not been
-> assembled or run on real hardware yet. Treat the first build as a release candidate
-> to test in a virtual machine, not as something to trust with your safety.
+> **Status: version 0.1, development build.**
+> The amd64 ISO builds on GitHub Actions and has been boot-tested in VirtualBox: the
+> desktop, both daemons, Anonymous Mode (Tor exit confirmed, non-Tor traffic blocked),
+> the sandbox, the application engine and the Control Center all ran. It has not been
+> tested on physical hardware, with UEFI Secure Boot, or with encrypted persistence,
+> and nothing has been security-audited. Do not trust it with your safety yet.
 
 ## What it is built on
 
