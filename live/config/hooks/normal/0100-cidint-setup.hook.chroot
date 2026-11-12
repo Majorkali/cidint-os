@@ -58,6 +58,9 @@ sed -i -e 's/^PRETTY_NAME=.*/PRETTY_NAME="CIDINT OS 0.1"/' \
        -e 's/^NAME=.*/NAME="CIDINT OS"/' \
        -e 's/^VERSION=.*/VERSION="0.1"/' \
        -e '/^\(HOME_URL\|SUPPORT_URL\|BUG_REPORT_URL\|LOGO\)=/d' /usr/lib/os-release
+# /etc/os-release is what programs actually read; make sure it is the same file.
+rm -f /etc/os-release
+ln -s ../usr/lib/os-release /etc/os-release
 
 # Login screen: CIDINT wallpaper instead of the Debian artwork.
 for theme in /usr/share/sddm/themes/*/; do
