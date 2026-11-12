@@ -98,6 +98,7 @@ SIZE=$(stat -c %s "$ISO")
 mkdir -p "$OUT"
 mv "$ISO" "$OUT/"   # move, not copy: the image is several GB
 cp "$RESULT/build.log" "$OUT/build-$ARCH.log" 2>/dev/null || true
+cp "$RESULT/live/chroot/usr/share/cidint/optional-missing.txt" "$OUT/optional-missing-$ARCH.txt" 2>/dev/null || true
 ( cd "$OUT" && sha256sum "cidint-os-$ARCH.iso" > "cidint-os-$ARCH.iso.sha256" )
 log "done: $OUT/cidint-os-$ARCH.iso ($((SIZE / 1048576)) MB)"
 log "write it to a USB stick with Rufus (DD mode), balenaEtcher or: dd if=... of=/dev/sdX bs=4M status=progress"
