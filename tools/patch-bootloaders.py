@@ -1,28 +1,33 @@
 #!/usr/bin/env python3
 """Brand the boot menus and add an 'encrypted persistence' entry.
 
-live-build uses config/bootloaders/<name>/ instead of its own templates when
-that directory exists, so we copy the stock templates and patch the copies:
+Runs from a live-build *binary* hook, i.e. on the finished boot files just
+before the ISO is assembled, so it works on real menu entries rather than on
+live-build's internal templates:
   * "Live system" is renamed to "CIDINT OS (amnesic)".
-  * The default entry is duplicated with
+  * The default live entry is duplicated with
     `persistence persistence-encryption=luks` appended to the kernel command
     line, so an encrypted persistence volume is only ever unlocked when the
     user explicitly picks that entry.
+  * GRUB (UEFI) gets a 5 second auto-boot timeout.
+  * The GRUB theme title is rebranded.
 
-The script is defensive: if a template does not look as expected it is left
-untouched and the build continues (the option can still be typed at the boot
-prompt).
+Defensive by design: a file that does not look as expected is left untouched
+and the build continues.
 
-usage: patch-bootloaders.py <live-build config dir>
+usage: patch-bootloaders.py <binary dir>
 """
 import re
-import shutil
 import sys
 from pathlib import Path
 
-STOCK = Path("/usr/share/live/build/bootloaders")
 PERSIST = "persistence persistence-encryption=luks"
 MARK = "encrypted persistence"
+LIVE = "boot=live"
+
+
+def _append(line: str) -> str:
+    return line.rstrip() + " " + PERSIST if LIVE in line else line
 
 
 def patch_grub(text: str) -> str:
@@ -36,12 +41,13 @@ def patch_grub(text: str) -> str:
         if end is None:
             return text
         block = lines[i:end + 1]
-        if not any("@APPEND_LIVE@" in b for b in block):
+        if not any(LIVE in b for b in block):
             continue
-        dup = [b.replace("@APPEND_LIVE@", "@APPEND_LIVE@ " + PERSIST) for b in block]
+        dup = [_append(b) for b in block]
         dup[0] = re.sub(r'"[^"]*"', f'"CIDINT OS ({MARK})"', dup[0], count=1)
         dup[0] = re.sub(r"\s--hotkey=\S+", "", dup[0])
-        return "\n".join(lines[:end + 1] + dup + lines[end + 1:])
+        out = lines[:i] + ["set timeout=5", "set default=0"] + block + dup + lines[end + 1:]
+        return "\n".join(out)
     return text
 
 
@@ -56,7 +62,7 @@ def patch_syslinux(text: str) -> str:
         while end < len(lines) and lines[end].strip() and not re.match(r"\s*label\s", lines[end], re.I):
             end += 1
         block = lines[i:end]
-        if not any("@APPEND_LIVE@" in b for b in block):
+        if not any(LIVE in b for b in block):
             continue
         dup = []
         for b in block:
@@ -67,35 +73,39 @@ def patch_syslinux(text: str) -> str:
             elif re.match(r"\s*menu\s+label", b, re.I):
                 indent = b[:len(b) - len(b.lstrip())]
                 b = f"{indent}menu label CIDINT OS ({MARK})"
-            dup.append(b.replace("@APPEND_LIVE@", "@APPEND_LIVE@ " + PERSIST))
+            dup.append(_append(b))
         return "\n".join(lines[:end] + [""] + dup + lines[end:])
     return text
 
 
+def rebrand(text: str) -> str:
+    text = text.replace("Live system", "CIDINT OS (amnesic)")
+    return re.sub(r"Debian GNU/Linux[^\"'\n]*", "CIDINT OS 0.1", text)
+
+
 def main() -> int:
-    config = Path(sys.argv[1])
-    dest = config / "bootloaders"
-    if not STOCK.is_dir():
-        print(f"patch-bootloaders: {STOCK} not found, leaving boot menus stock")
-        return 0
-    if not dest.exists():
-        shutil.copytree(STOCK, dest, symlinks=True)
+    root = Path(sys.argv[1])
     changed = 0
-    for f in dest.rglob("*"):
-        if f.is_symlink() or not f.is_file() or f.suffix not in (".cfg", ".in"):
+    for f in sorted(root.rglob("*")):
+        if f.is_symlink() or not f.is_file() or f.suffix not in (".cfg", ".txt"):
+            continue
+        rel = f.relative_to(root).as_posix()
+        if not rel.startswith(("boot/grub", "isolinux", "syslinux", "EFI")):
             continue
         try:
             old = f.read_text()
-        except UnicodeDecodeError:
+        except (UnicodeDecodeError, OSError):
             continue
-        new = patch_grub(old) if "menuentry" in old else patch_syslinux(old)
-        new = new.replace("Live system", "CIDINT OS (amnesic)")
+        new = old
+        if f.suffix == ".cfg":
+            new = patch_grub(new) if "menuentry" in new else patch_syslinux(new)
+        new = rebrand(new)
         if new != old:
             f.write_text(new)
             changed += 1
-            print(f"patch-bootloaders: patched {f.relative_to(dest)}")
+            print(f"patch-bootloaders: patched {rel}")
     if not changed:
-        print("patch-bootloaders: no template matched; boot menus left stock")
+        print("patch-bootloaders: nothing matched; boot menus left stock")
     return 0
 
 

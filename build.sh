@@ -42,7 +42,6 @@ inside() {  # the actual build; expects a Debian 13 environment
     apt-get update
     apt-get install -y live-build python3 ca-certificates
     cd "$1/live"
-    python3 "$1/tools/patch-bootloaders.py" config
     log "configuring ($ARCH)"
     CIDINT_ARCH="$ARCH" lb config
     log "building image: this is the long part"

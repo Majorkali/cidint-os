@@ -258,27 +258,56 @@ class Assistant(unittest.TestCase):
 
 
 class BootMenus(unittest.TestCase):
-    GRUB = ('menuentry "Live system (@FLAVOUR@)" --hotkey=l {\n\tlinux\t@KERNEL_LIVE@ @APPEND_LIVE@\n'
-            '\tinitrd\t@INITRD_LIVE@\n}\nmenuentry "Other" {\n\tchainloader x\n}\n')
-    SYSLINUX = ("label live-@FLAVOUR@\n\tmenu label ^Live system (@FLAVOUR@)\n\tmenu default\n"
-                "\tlinux @LINUX@\n\tinitrd @INITRD@\n\tappend @APPEND_LIVE@\n\nlabel other\n\tkernel x\n")
+    GRUB = ('set theme=x
+menuentry "Live system (amd64)" --hotkey=l {
+'
+            '	linux	/live/vmlinuz-6.12 boot=live components quiet
+'
+            '	initrd	/live/initrd.img-6.12
+}
+menuentry "Other" {
+	chainloader x
+}
+')
+    SYSLINUX = ("label live-amd64
+	menu label ^Live system (amd64)
+	menu default
+"
+                "	linux /live/vmlinuz
+	initrd /live/initrd.img
+	append boot=live components quiet
+"
+                "
+label other
+	kernel x
+")
 
     def test_grub(self):
         out = patch_bootloaders.patch_grub(self.GRUB)
         self.assertEqual(out.count("menuentry"), 3)
         self.assertEqual(out.count("persistence-encryption=luks"), 1)
+        self.assertIn("boot=live components quiet persistence persistence-encryption=luks", out)
         self.assertEqual(out.count("--hotkey=l"), 1)
+        self.assertLess(out.index("set timeout=5"), out.index("menuentry"))
         self.assertEqual(patch_bootloaders.patch_grub(out), out)      # idempotent
 
     def test_syslinux(self):
         out = patch_bootloaders.patch_syslinux(self.SYSLINUX)
-        self.assertIn("label live-@FLAVOUR@-persist", out)
+        self.assertIn("label live-amd64-persist", out)
         self.assertEqual(out.count("menu default"), 1)
         self.assertEqual(out.count("persistence-encryption=luks"), 1)
         self.assertEqual(patch_bootloaders.patch_syslinux(out), out)
 
+    def test_rebrand(self):
+        out = patch_bootloaders.rebrand('text = "Debian GNU/Linux 13 (trixie) amd64"
+Live system (amd64)')
+        self.assertEqual(out, 'text = "CIDINT OS 0.1"
+CIDINT OS (amnesic) (amd64)')
+
     def test_unknown_template_untouched(self):
-        self.assertEqual(patch_bootloaders.patch_grub("set timeout=5\n"), "set timeout=5\n")
+        self.assertEqual(patch_bootloaders.patch_grub("set timeout=5
+"), "set timeout=5
+")
 
 
 class ShippedFiles(unittest.TestCase):
