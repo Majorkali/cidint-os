@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (QApplication, QFileDialog, QFrame, QGridLayout, QHB
                              QLineEdit, QListWidget, QMainWindow, QPlainTextEdit, QPushButton,
                              QStackedWidget, QVBoxLayout, QWidget)
 
-from . import CLI, VERSION, assistant, domains, hwadapt, read_json, sentinel, uaee
+from . import CLI, VERSION, assistant, domains, hwadapt, read_json, sentinel, session, uaee
 from .cli import posture
 
 ACCENT, OK, BAD, WARN = "#35e0c8", "#3ddc97", "#ff5c7a", "#ffc857"
@@ -203,6 +203,23 @@ class Center(QMainWindow):
         self.ov_checks = label()
         self.ov_checks.setTextFormat(Qt.TextFormat.RichText)
         lay.addWidget(card(self.ov_checks, title="Protection checks"))
+        self.ses_state = label("", "dim")
+        row = QHBoxLayout()
+        keep = QPushButton("Continue after reboot")
+        keep.setObjectName("primary")
+        keep.setToolTip("Save the applications you have open now and reopen them at the next login")
+        keep.clicked.connect(lambda: self.run_cli(["session", "save"]))
+        again = QPushButton("Resume last session now")
+        again.clicked.connect(lambda: self.run_cli(["session", "restore"]))
+        forget = QPushButton("Forget saved session")
+        forget.clicked.connect(lambda: self.run_cli(["session", "clear"]))
+        for b in (keep, again, forget):
+            row.addWidget(b)
+        row.addStretch()
+        holder = QWidget()
+        holder.setLayout(row)
+        row.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(card(self.ses_state, holder, title="Session"))
         lay.addStretch()
         return w
 
@@ -350,6 +367,8 @@ class Center(QMainWindow):
         self.ov_checks.setText("<br>".join(
             f"<span style='color:{OK if v else BAD}'>{'&#10003;' if v else '&#10007;'}</span>&nbsp;&nbsp;{k}"
             for k, v in p["checks"].items()))
+        self.ses_state.setText(session.describe() + ("" if session.is_persistent() else
+                               "  Amnesic mode: a saved session does not survive power-off."))
         if hw:
             inv = hw.get("inventory", {})
             total = max(1, hw.get("mem_total_mb", 1))

@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from . import (ETC_DIR, RUN_DIR, SHARE_DIR, VERSION, anon, assistant, domains, elevate, have,
-               hwadapt, read, read_json, sentinel, sh, uaee)
+               hwadapt, read, read_json, sentinel, session, sh, uaee)
 
 
 def _kv(title: str, rows: list) -> None:
@@ -298,6 +298,9 @@ def cmd_session_init(_a) -> int:
     """Per-user first-login setup: apply the CIDINT look, adapt effects to the hardware."""
     marker = Path.home() / ".config" / "cidint-session-initialized"
     if marker.exists():
+        started = session.resume_if_pending()      # continue the last tasks after a reboot
+        if started and have("notify-send"):
+            sh(["notify-send", "-a", "CIDINT OS", "Session resumed", ", ".join(started)])
         return 0
     if have("plasma-apply-colorscheme"):
         sh(["plasma-apply-colorscheme", "CidintDark"])
@@ -319,6 +322,31 @@ def cmd_session_init(_a) -> int:
                 break
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
+    return 0
+
+
+def cmd_session(a) -> int:
+    if a.action == "save":
+        data = session.save()
+        print(f"Saved {len(data['apps'])} open application(s):")
+        for app in data["apps"]:
+            print("  " + app["name"])
+        if session.is_persistent():
+            print("They will reopen automatically the next time you log in, including after a reboot.")
+        else:
+            print("NOTE: this is an amnesic session, so nothing survives a reboot by design.")
+            print("The session will resume after logging out and in, but not after power-off.")
+            print("Boot the 'encrypted persistence' entry to resume across reboots.")
+        return 0
+    if a.action == "restore":
+        started = session.restore()
+        print("Reopened: " + ", ".join(started) if started else "Nothing to reopen.")
+        return 0
+    if a.action == "clear":
+        session.clear()
+        print("Saved session removed.")
+        return 0
+    print(session.describe())
     return 0
 
 
@@ -378,6 +406,10 @@ def main(argv=None) -> int:
     s.add_argument("text", nargs="+")
     s.add_argument("-y", "--yes", action="store_true")
     s.set_defaults(fn=cmd_ask)
+
+    s = sub.add_parser("session", help="save open applications and continue them after a reboot")
+    s.add_argument("action", choices=["save", "restore", "status", "clear"])
+    s.set_defaults(fn=cmd_session)
 
     sub.add_parser("center", help="open the Control Center").set_defaults(fn=cmd_center)
     sub.add_parser("session-init", help=argparse.SUPPRESS).set_defaults(fn=cmd_session_init)

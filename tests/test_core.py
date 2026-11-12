@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CHROOT = ROOT / "live" / "config" / "includes.chroot"
 sys.path.insert(0, str(CHROOT / "usr" / "lib" / "cidint"))
 
-from cidint import assistant, hwadapt, sentinel, uaee  # noqa: E402
+from cidint import assistant, hwadapt, sentinel, session, uaee  # noqa: E402
 
 spec = importlib.util.spec_from_file_location("patch_bootloaders", ROOT / "tools" / "patch-bootloaders.py")
 patch_bootloaders = importlib.util.module_from_spec(spec)
@@ -287,6 +287,55 @@ class BootMenus(unittest.TestCase):
 
     def test_unknown_template_untouched(self):
         self.assertEqual(patch_bootloaders.patch_grub("set x=5"), "set x=5")
+
+
+class Session(unittest.TestCase):
+    def test_exec_binary(self):
+        self.assertEqual(session.exec_binary("/usr/bin/firefox-esr %u"), "firefox-esr")
+        self.assertEqual(session.exec_binary("env GDK_BACKEND=x11 /opt/app/run --flag"), "run")
+        self.assertEqual(session.exec_binary('"/usr/bin/kate" -b %U'), "kate")
+        self.assertEqual(session.exec_binary(""), "")
+
+    def test_parse_desktop(self):
+        ok = "[Desktop Entry]" + chr(10) + "Type=Application" + chr(10) + "Name=Kate" + chr(10) + "Exec=kate -b %U"
+        self.assertEqual(session.parse_desktop(ok), {"name": "Kate", "binary": "kate"})
+        self.assertIsNone(session.parse_desktop(ok + chr(10) + "NoDisplay=true"))
+        self.assertIsNone(session.parse_desktop(ok.replace("Exec=kate", "Exec=python3 /x.py")))
+        self.assertIsNone(session.parse_desktop(ok.replace("Application", "Link")))
+        # keys in other sections (desktop actions) must not override the main entry
+        extra = ok + chr(10) + "[Desktop Action new]" + chr(10) + "Exec=other" + chr(10) + "Name=Other"
+        self.assertEqual(session.parse_desktop(extra)["binary"], "kate")
+
+    def test_save_restore_roundtrip(self):
+        import os
+        with tempfile.TemporaryDirectory() as d:
+            old = os.environ.get("XDG_DATA_HOME")
+            os.environ["XDG_DATA_HOME"] = d
+            try:
+                self.assertEqual(session.describe(), "No saved session.")
+                self.assertEqual(session.resume_if_pending(launch=None) if False else [], [])
+                apps = [{"name": "Kate", "argv": ["/usr/bin/kate", "notes.txt"], "cwd": ""},
+                        {"name": "Firefox", "argv": ["/usr/bin/firefox-esr"], "cwd": "/nonexistent"}]
+                session.save(apps)
+                self.assertTrue(session.load()["resume"])
+                self.assertIn("will resume", session.describe())
+                launched = []
+                started = session.restore(launch=lambda argv, cwd: launched.append((argv, cwd)),
+                                          running={("/usr/bin/firefox-esr",)})
+                self.assertEqual(started, ["Kate"])                 # Firefox already open: not duplicated
+                self.assertEqual(launched, [(["/usr/bin/kate", "notes.txt"], None)])
+                self.assertFalse(session.load()["resume"])          # one-shot: no relaunch loop
+                session.clear()
+                self.assertEqual(session.load(), {})
+            finally:
+                if old is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = old
+
+    def test_assistant_knows_session(self):
+        self.assertEqual(assistant.interpret("continue my tasks after reboot")[1][1:], ["session", "save"])
+        self.assertEqual(assistant.interpret("resume my work")[1][1:], ["session", "restore"])
 
 
 class ShippedFiles(unittest.TestCase):

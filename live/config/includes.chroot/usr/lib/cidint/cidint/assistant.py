@@ -25,7 +25,8 @@ SYNONYMS = {
     "program": "app", "application": "app", "throwaway": "disposable", "temporary": "disposable",
     "errors": "log", "logs": "log", "problems": "log", "wrong": "log", "update": "upgrade",
     "updates": "upgrade", "browser": "browse", "browsing": "browse", "compartments": "domain",
-    "domains": "domain", "the": "", "my": "", "me": "", "please": "", "a": "", "is": "", "to": "",
+    "domains": "domain", "tasks": "session", "work": "session",
+    "restart": "reboot", "rebooting": "reboot", "reopen": "resume", "after": "", "the": "", "my": "", "me": "", "please": "", "a": "", "is": "", "to": "",
     "i": "", "want": "", "can": "", "you": "", "show": "", "what": "", "whats": "", "of": "",
 }
 
@@ -59,6 +60,10 @@ INTENTS = [
      ["journalctl", "-b", "-p", "err", "--no-pager", "-n", "40"], False),
     ("upgrade", "Install pending security updates",
      ["sudo", "sh", "-c", "apt-get update && apt-get -y upgrade"], True),
+    ("save session", "Save open applications to continue after a reboot", [CLI, "session", "save"], False),
+    ("continue reboot", "Save open applications to continue after a reboot", [CLI, "session", "save"], False),
+    ("resume", "Reopen the applications from your last saved session", [CLI, "session", "restore"], False),
+    ("restore session", "Reopen the applications from your last saved session", [CLI, "session", "restore"], False),
     ("scan threat", "Scan your home directory for malware",
      ["clamscan", "-r", "-i", "--no-summary", "."], False),
 ]
