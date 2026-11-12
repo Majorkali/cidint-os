@@ -152,6 +152,19 @@ class Planning(unittest.TestCase):
     def test_unknown_refused(self):
         self.assertFalse(self.plan("unknown").supported)
 
+    def test_space_estimate(self):
+        mb = 1024 * 1024
+        self.assertGreaterEqual(uaee.space_needed_mb("msi", 200 * mb), 1400 + 600)   # Wine prefix + program
+        self.assertLess(uaee.space_needed_mb("script", 1000), 100)
+        self.assertGreater(uaee.free_mb(tempfile.gettempdir()), 0)
+        self.assertTrue(uaee.space_advice())
+
+    def test_installed_msi_program_needs_no_installer_file(self):
+        argv = uaee.sandbox_argv(uaee.FileInfo("", "msi", ""), None, net=False,
+                                 exe="Program Files/App/app.exe")
+        self.assertNotIn("/run/app/", " ".join(argv))
+        self.assertEqual(argv[argv.index("--") + 1:], ["wine", "/home/user/.wine/drive_c/Program Files/App/app.exe"])
+
     def test_sandbox_command(self):
         with tempfile.TemporaryDirectory() as d:
             exe = Path(d) / "tool.exe"

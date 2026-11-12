@@ -300,9 +300,9 @@ def _root(cmd: list[str]) -> int:
 
 def sandbox_argv(info: FileInfo, home: Path | None, net: bool, exe: str = "") -> list[str]:
     """Build the sandboxed command line for a runnable file."""
-    src = os.path.abspath(info.path)
+    src = os.path.abspath(info.path) if info.path else ""
     inside = "/run/app/" + os.path.basename(src)
-    binds = ((src, inside),)
+    binds = () if exe else ((src, inside),)   # an installed program needs no installer file
     k, env = info.kind, {}
     if k in ("pe", "msi", "winbatch"):
         env = {"WINEPREFIX": SANDBOX_HOME + "/.wine", "WINEDEBUG": "-all"}
@@ -359,8 +359,53 @@ def install(path, net: bool = False, force: bool = False, log=print) -> str | No
         log("      cannot install this file on this system.")
         return None
 
+    need, free = space_needed_mb(info.kind, os.path.getsize(path)), free_mb(user_data())
+    if free < need:
+        log(f"      not enough free space: this needs about {need} MB, only {free} MB is available.")
+        for line in space_advice():
+            log("      " + line)
+        return None
+
     app_id = _new_id(path, digest)
     d = _app_dir(app_id)
+    try:
+        return _install_steps(path, info, digest, app_id, d, net, log)
+    except OSError as exc:
+        shutil.rmtree(d, ignore_errors=True)        # give the space back
+        if exc.errno == 28:
+            log("      ran out of space during installation; the partial install was removed.")
+            for line in space_advice():
+                log("      " + line)
+        else:
+            log(f"      installation failed: {exc}")
+        return None
+
+
+def free_mb(where) -> int:
+    return shutil.disk_usage(where).free // (1024 * 1024)
+
+
+def space_needed_mb(kind: str, size_bytes: int) -> int:
+    """Rough space an install consumes, so we can refuse cleanly instead of failing midway."""
+    size = size_bytes // (1024 * 1024) + 1
+    if kind in ("pe", "msi"):
+        return 1400 + 3 * size      # fresh Wine prefix (64 + 32 bit) plus the unpacked program
+    if kind in ("deb", "rpm", "archive", "flatpak", "snap"):
+        return 100 + 4 * size
+    return 50 + 2 * size
+
+
+def space_advice() -> list:
+    cmdline = Path("/proc/cmdline").read_text() if os.path.exists("/proc/cmdline") else ""
+    if "boot=live" in cmdline and " persistence" not in " " + cmdline:
+        return ["This is an amnesic session: every file is kept in memory, so free space is limited by RAM.",
+                "Give the machine more RAM (8 GB or more is comfortable for Windows software),",
+                "or boot the 'encrypted persistence' entry so installs go to disk.",
+                "Deleting large downloads you no longer need also frees space immediately."]
+    return ["Free some disk space and try again."]
+
+
+def _install_steps(path, info, digest, app_id, d, net, log) -> str | None:
     rec = {"id": app_id, "name": Path(path).stem, "kind": info.kind, "arch": info.arch,
            "sha256": digest, "source": os.path.abspath(path), "installed": int(time.time()),
            "net": net, "packages": []}
@@ -403,24 +448,37 @@ def install(path, net: bool = False, force: bool = False, log=print) -> str | No
         log(f"      extracted to {src}")
         log(f"      suggested build: {rec['build_hint'] or 'no known build system found'}")
     else:
-        payload = d / os.path.basename(path)
-        shutil.copy2(path, payload)
-        os.chmod(payload, 0o755)
-        rec["payload"] = str(payload)
         home = d / "home"
-        if k in ("pe", "msi"):
+        if k == "msi":
+            # An MSI is only an installer: run it from where it is, never keep a second copy.
             prefix_c = home / ".wine" / "drive_c"
-            before_exes = set(_program_exes(prefix_c))
-            subprocess.call(sandbox_argv(detect(payload), home, net))
-            new = [e for e in _program_exes(prefix_c) if e not in before_exes
-                   and "unins" not in e.lower()][:5]
+            rc = subprocess.call(sandbox_argv(info, home, net))
+            new = [e for e in _program_exes(prefix_c) if "unins" not in e.lower()][:5]
+            if not new:
+                shutil.rmtree(d, ignore_errors=True)
+                log(f"      the installer exited with code {rc} and installed no program; nothing was kept.")
+                return None
             rec["exes"] = new
             for e in new:
                 _launcher(app_id, Path(e).stem, e)
-            if not new:
-                _launcher(app_id, rec["name"])
         else:
-            _launcher(app_id, rec["name"])
+            payload = d / os.path.basename(path)
+            shutil.copy2(path, payload)
+            os.chmod(payload, 0o755)
+            rec["payload"] = str(payload)
+            if k == "pe":
+                prefix_c = home / ".wine" / "drive_c"
+                before_exes = set(_program_exes(prefix_c))
+                subprocess.call(sandbox_argv(detect(payload), home, net))
+                new = [e for e in _program_exes(prefix_c) if e not in before_exes
+                       and "unins" not in e.lower()][:5]
+                rec["exes"] = new
+                for e in new:
+                    _launcher(app_id, Path(e).stem, e)
+                if not new:
+                    _launcher(app_id, rec["name"])   # portable program: launch the file itself
+            else:
+                _launcher(app_id, rec["name"])
     reg = registry()
     reg[app_id] = rec
     _save(reg)
@@ -461,9 +519,15 @@ def build_hint(src: Path) -> str:
 
 def run_installed(app_id: str, exe: str = "") -> int:
     rec = registry().get(app_id)
-    if not rec or "payload" not in rec:
-        raise KeyError(f"no runnable sandboxed app '{app_id}'")
-    info = detect(rec["payload"])
+    if not rec:
+        raise KeyError(f"no such app '{app_id}'")
+    if not exe and "payload" not in rec:
+        exe = (rec.get("exes") or [""])[0]           # installed from an MSI: start its first program
+        if not exe:
+            raise KeyError(f"'{app_id}' has nothing runnable")
+    info = FileInfo(rec.get("payload", ""), rec["kind"], rec.get("arch", ""))
+    if info.kind == "script":
+        info = detect(rec["payload"])                 # scripts need their interpreter line
     home = _app_dir(app_id) / "home"
     return subprocess.call(sandbox_argv(info, home, rec.get("net", False), exe))
 
