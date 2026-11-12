@@ -11,6 +11,11 @@ on:
         type: boolean
         default: false
 
+# A newer push supersedes a build still in progress.
+concurrency:
+  group: iso-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest

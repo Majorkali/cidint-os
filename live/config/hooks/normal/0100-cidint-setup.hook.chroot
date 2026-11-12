@@ -36,7 +36,8 @@ EOF
 
 echo "CIDINT: services"
 chmod 0755 /usr/bin/cidint
-systemctl enable nftables.service apparmor.service cidint-hwadapt.service cidint-sentinel.service
+systemctl enable nftables.service apparmor.service cidint-hwadapt.service cidint-sentinel.service \
+                 cidint-user.service
 # Anonymity is an explicit user choice; nothing phones home at boot.
 systemctl disable tor.service 2>/dev/null || true
 for unit in clamav-freshclam.service avahi-daemon.service avahi-daemon.socket cups-browsed.service \
@@ -51,8 +52,23 @@ if command -v freshclam >/dev/null 2>&1; then
 fi
 
 echo "CIDINT: branding"
-sed -i -e 's/^PRETTY_NAME=.*/PRETTY_NAME="CIDINT OS 0.1 (Debian 13 base)"/' \
-       -e 's/^NAME=.*/NAME="CIDINT OS"/' /usr/lib/os-release
+# ID and VERSION_CODENAME stay as Debian's: apt, distrobox and other tools rely on
+# them. Everything a person sees says CIDINT OS.
+sed -i -e 's/^PRETTY_NAME=.*/PRETTY_NAME="CIDINT OS 0.1"/' \
+       -e 's/^NAME=.*/NAME="CIDINT OS"/' \
+       -e 's/^VERSION=.*/VERSION="0.1"/' \
+       -e '/^\(HOME_URL\|SUPPORT_URL\|BUG_REPORT_URL\|LOGO\)=/d' /usr/lib/os-release
+
+# Login screen: CIDINT wallpaper instead of the Debian artwork.
+for theme in /usr/share/sddm/themes/*/; do
+    [ -f "$theme/theme.conf" ] || continue
+    printf '[General]\nbackground=/usr/share/cidint/wallpaper.svg\ntype=image\n' > "$theme/theme.conf.user"
+done
+
+# Boot splash: a plain text theme that shows the OS name, no distribution logo.
+if command -v plymouth-set-default-theme >/dev/null 2>&1; then
+    plymouth-set-default-theme tribar 2>/dev/null || plymouth-set-default-theme text 2>/dev/null || true
+fi
 printf 'CIDINT OS 0.1 \\n \\l\n\n' > /etc/issue
 printf 'CIDINT OS 0.1\n' > /etc/issue.net
 cat > /etc/motd <<'EOF'

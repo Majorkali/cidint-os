@@ -72,6 +72,15 @@ The boot menu offers *CIDINT OS (amnesic)*, where nothing is written to disk, an
 *CIDINT OS (encrypted persistence)*, which unlocks a LUKS2 volume you created with
 `sudo cidint persist create /dev/sdXN --yes-destroy-data`.
 
+## Default account
+
+The live user is **`cidint`** with password **`cidint`** (needed for the lock screen and
+for authentication prompts). The desktop logs in automatically.
+
+This password is public knowledge, exactly like the default on other live systems. It
+is acceptable for an amnesic session with no remote login service running. If you use
+encrypted persistence, change it straight away with `passwd`.
+
 ## Using it
 
 ```bash
@@ -90,6 +99,9 @@ cidint domain vm suspicious.iso     # throwaway virtual machine
 cidint app inspect setup.exe        # what is it, will it run, is it clean
 cidint app install program.AppImage # scan, isolate, add to launcher
 cidint app run script.sh            # run once in a disposable sandbox
+
+cidint session save                 # continue these apps after the next login/reboot
+cidint session restore              # reopen the last saved session now
 
 cidint hw status                    # hardware and adaptive tuning
 cidint sentinel events              # behavioural detections

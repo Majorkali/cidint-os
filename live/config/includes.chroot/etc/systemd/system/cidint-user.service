@@ -1,0 +1,15 @@
+[Unit]
+Description=CIDINT default account credentials
+# The live user is created by live-config at boot; give it the documented
+# default password (cidint / cidint) before the login screen appears.
+After=live-config.service
+Before=display-manager.service sddm.service getty.target
+ConditionKernelCommandLine=boot=live
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'id cidint >/dev/null 2>&1 && echo cidint:cidint | chpasswd && chfn -f CIDINT cidint || true'
+
+[Install]
+WantedBy=multi-user.target

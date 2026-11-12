@@ -83,9 +83,55 @@ def rebrand(text: str) -> str:
     return re.sub(r"Debian GNU/Linux[^\"'\n]*", "CIDINT OS 0.1", text)
 
 
+def make_splash(width: int, height: int) -> bytes:
+    """A CIDINT boot background as PNG bytes: dark gradient with a teal glow. No dependencies."""
+    import struct
+    import zlib
+
+    cx, cy, radius = width * 0.74, height * 0.36, max(width, height) * 0.55
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)                                  # PNG filter type: none
+        fy = y / max(1, height - 1)
+        for x in range(width):
+            fx = x / max(1, width - 1)
+            t = (fx + fy) / 2                          # diagonal base gradient
+            r, g, b = 5 + 10 * t, 8 + 19 * t, 15 + 36 * t
+            d = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5 / radius
+            glow = max(0.0, 1 - d) ** 2 * 0.30
+            raw += bytes((int(r + (53 - r) * glow), int(g + (224 - g) * glow), int(b + (200 - b) * glow)))
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + chunk(b"IEND", b""))
+
+
+def replace_splashes(root: Path) -> int:
+    """Swap the distribution boot artwork for the CIDINT background, keeping each image's size."""
+    import struct
+    count = 0
+    for f in sorted(root.rglob("splash*.png")):
+        try:
+            head = f.read_bytes()[:24]
+            if head[:8] != b"\x89PNG\r\n\x1a\n":
+                continue
+            width, height = struct.unpack(">II", head[16:24])
+            if not (64 <= width <= 4096 and 64 <= height <= 4096):
+                continue
+            f.write_bytes(make_splash(width, height))
+            count += 1
+            print(f"patch-bootloaders: replaced {f.relative_to(root).as_posix()} ({width}x{height})")
+        except (OSError, struct.error):
+            continue
+    return count
+
+
 def main() -> int:
     root = Path(sys.argv[1])
-    changed = 0
+    changed = replace_splashes(root)
     for f in sorted(root.rglob("*")):
         if f.is_symlink() or not f.is_file() or f.suffix not in (".cfg", ".txt"):
             continue

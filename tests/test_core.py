@@ -285,6 +285,26 @@ class BootMenus(unittest.TestCase):
         out = patch_bootloaders.rebrand('text = "Debian GNU/Linux 13 (trixie) amd64"' + chr(10) + 'Live system (amd64)')
         self.assertEqual(out, 'text = "CIDINT OS 0.1"' + chr(10) + 'CIDINT OS (amnesic) (amd64)')
 
+    def test_splash_is_valid_png_of_requested_size(self):
+        import struct
+        import zlib
+        png = patch_bootloaders.make_splash(80, 60)
+        self.assertEqual(png[:8], bytes([137, 80, 78, 71, 13, 10, 26, 10]))
+        self.assertEqual(struct.unpack(">II", png[16:24]), (80, 60))
+        length = struct.unpack(">I", png[33:37])[0]
+        self.assertEqual(png[37:41], b"IDAT")
+        self.assertEqual(len(zlib.decompress(png[41:41 + length])), 60 * (1 + 80 * 3))
+
+    def test_splash_replacement_keeps_dimensions(self):
+        import struct
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "boot" / "grub"
+            target.mkdir(parents=True)
+            (target / "splash.png").write_bytes(patch_bootloaders.make_splash(96, 64))
+            (target / "notes.png").write_bytes(b"not a png")
+            self.assertEqual(patch_bootloaders.replace_splashes(Path(d)), 1)
+            self.assertEqual(struct.unpack(">II", (target / "splash.png").read_bytes()[16:24]), (96, 64))
+
     def test_unknown_template_untouched(self):
         self.assertEqual(patch_bootloaders.patch_grub("set x=5"), "set x=5")
 

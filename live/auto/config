@@ -22,5 +22,5 @@ lb config noauto \
     --iso-application "CIDINT OS" \
     --iso-publisher "CIDINT OS Project" \
     --iso-volume "CIDINT_OS" \
-    --bootappend-live "boot=live components quiet splash username=cidint hostname=cidint $HARDEN" \
+    --bootappend-live "boot=live components quiet splash username=cidint user-fullname=CIDINT hostname=cidint $HARDEN" \
     "${@}"
