@@ -7,8 +7,8 @@ Cargo.lock, so the Yocto build fetches exactly what was tested.
     python scripts/gen-crates-inc.py            # rewrite the .inc file
     python scripts/gen-crates-inc.py --check    # exit 1 if it is stale
 """
+import re
 import sys
-import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -17,8 +17,23 @@ OUT = ROOT / "meta-cidint/recipes-cidint/cidint-cli/cidint-cli-crates.inc"
 REGISTRY = "registry+https://github.com/rust-lang/crates.io-index"
 
 
+def read_lock() -> list:
+    """Parse the [[package]] tables of Cargo.lock.
+
+    Cargo.lock is machine-written with one `key = "value"` per line, so a
+    small parser is enough and works on Python older than 3.11 (no tomllib).
+    """
+    packages = []
+    for block in LOCK.read_text(encoding="utf-8").split("[[package]]")[1:]:
+        fields = dict(re.findall(r'^(\w+) = "([^"]*)"$', block, flags=re.M))
+        if "name" not in fields or "version" not in fields:
+            sys.exit(f"cannot parse Cargo.lock package entry: {block[:80]!r}")
+        packages.append(fields)
+    return packages
+
+
 def render() -> str:
-    packages = tomllib.loads(LOCK.read_text(encoding="utf-8"))["package"]
+    packages = read_lock()
     crates = []
     for p in packages:
         source = p.get("source")

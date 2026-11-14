@@ -60,10 +60,25 @@ failed units.
 | `cargo check --target x86_64-unknown-linux-musl` | 1.100.0 | compiles (type-check only, nothing executed) |
 | `scripts/gen-crates-inc.py --check` | Python 3.11.9 | crate list matches `Cargo.lock` |
 
-Not run on this date, and therefore unproven:
+### 2026-11-14, GitHub Actions run 43562479096 (commit `81f717b`)
 
-- Any execution on Linux (including the Unix-only code paths: directory
-  `fsync`, file modes in backups, live hardware inventory).
+- Runner: `ubuntu-22.04`, x86_64
+
+| Step | stable | 1.75.0 |
+|---|---|---|
+| Format | passed | not run (stable only) |
+| Lint (`clippy -D warnings`) | passed | not run (stable only) |
+| `cargo test --workspace --locked` | passed | passed |
+| Crate list matches `Cargo.lock` | **failed** | **failed** |
+| CLI on real Linux (`hardware inventory`, `system info`) | skipped after the failure | skipped |
+
+The failure was in the check script, not the product: it imported `tomllib`,
+which the runner's Python 3.10 does not have. Fixed in the following commit.
+This run is the first execution of the unit and CLI tests on Linux.
+
+Not run so far, and therefore unproven:
+
+- Live hardware inventory on Linux (the CI step was skipped).
 - The Yocto build. The recipes, distro configuration and disk layout have
   never been parsed by BitBake.
 - The QEMU boot, reboot and power-loss test.
