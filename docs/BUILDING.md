@@ -54,11 +54,11 @@ sudo apt-get install -y gawk wget git diffstat unzip texinfo gcc build-essential
 ```
 
 ```bash
-pip3 install --user kas==4.8.2
+python3 -m venv ~/kas-venv && ~/kas-venv/bin/pip install --upgrade pip && ~/kas-venv/bin/pip install kas==4.8.2
 ```
 
 ```bash
-kas build kas/cidint-x86-64-dev.yml
+~/kas-venv/bin/kas build kas/cidint-x86-64-dev.yml
 ```
 
 Output: `build/tmp/deploy/images/genericx86-64/cidint-image-base-genericx86-64.wic`

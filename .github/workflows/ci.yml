@@ -63,13 +63,17 @@ jobs:
             gawk wget git diffstat unzip texinfo gcc build-essential chrpath socat cpio \
             python3 python3-pip python3-pexpect xz-utils debianutils iputils-ping \
             python3-git python3-jinja2 python3-subunit zstd lz4 file locales \
-            libacl1 qemu-system-x86 ovmf
+            libacl1 python3-venv qemu-system-x86 ovmf
       - name: Locale
         run: scripts/ci-run.sh "locale-gen" sudo locale-gen en_US.UTF-8
       - name: Install kas
         run: |
-          scripts/ci-run.sh "pip install kas" pip3 install --user kas==4.8.2
-          scripts/ci-run.sh "kas --version" ~/.local/bin/kas --version
+          # The runner's stock pip (22.0) cannot read kas's package metadata;
+          # use a virtual environment with a current pip.
+          python3 -m venv "$HOME/kas-venv"
+          scripts/ci-run.sh "pip upgrade" "$HOME/kas-venv/bin/pip" install --upgrade pip
+          scripts/ci-run.sh "pip install kas" "$HOME/kas-venv/bin/pip" install kas==4.8.2
+          scripts/ci-run.sh "kas --version" "$HOME/kas-venv/bin/kas" --version
           ls -l /usr/share/OVMF/
       - name: Restore build caches
         uses: actions/cache@v4
@@ -82,7 +86,7 @@ jobs:
       - name: Build image
         env:
           LANG: en_US.UTF-8
-        run: scripts/ci-run.sh "kas build" ~/.local/bin/kas build kas/cidint-x86-64-dev.yml
+        run: scripts/ci-run.sh "kas build" "$HOME/kas-venv/bin/kas" build kas/cidint-x86-64-dev.yml
       - name: Collect artifacts
         run: |
           set -euo pipefail
