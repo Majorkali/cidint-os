@@ -43,14 +43,14 @@ compiles the toolchain and takes several hours.
 
 ### GitHub Actions
 
-Run the **CI** workflow manually with *build_image* ticked. It builds the
+Every push to `main` runs the **CI** workflow, which builds the
 image, boots it in QEMU under UEFI, runs the reboot and power-loss tests,
 and uploads the image, `SHA256SUMS`, the SPDX archive and the test evidence.
 
 ### Local Linux (Ubuntu 22.04)
 
 ```bash
-sudo apt-get install -y gawk wget git diffstat unzip texinfo gcc build-essential chrpath socat cpio python3 python3-pip python3-pexpect xz-utils debianutils iputils-ping python3-git python3-jinja2 python3-subunit zstd liblz4-tool file locales libacl1 qemu-system-x86 ovmf
+sudo apt-get install -y gawk wget git diffstat unzip texinfo gcc build-essential chrpath socat cpio python3 python3-pip python3-pexpect xz-utils debianutils iputils-ping python3-git python3-jinja2 python3-subunit zstd lz4 file locales libacl1 python3-venv qemu-system-x86 ovmf
 ```
 
 ```bash
