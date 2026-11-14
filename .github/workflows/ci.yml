@@ -14,6 +14,11 @@ on:
 permissions:
   contents: read
 
+# A newer push replaces a build that is still running.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rust:
     name: Rust (${{ matrix.toolchain }})
@@ -45,7 +50,11 @@ jobs:
 
   image:
     name: Yocto image + QEMU persistence test
-    if: github.event_name == 'workflow_dispatch' && inputs.build_image
+    # Runs on every push to main (put "[skip image]" in the commit message
+    # to skip it) and on manual runs with build_image ticked.
+    if: >-
+      (github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip image]'))
+      || (github.event_name == 'workflow_dispatch' && inputs.build_image)
     needs: rust
     runs-on: ubuntu-22.04
     timeout-minutes: 350
