@@ -113,8 +113,21 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts/image
           deploy=build/tmp/deploy/images/genericx86-64
-          cp -L "$deploy/cidint-image-base-genericx86-64.wic" artifacts/image/cidint-os-0.2.0-dev-x86_64.wic
-          cp -L "$deploy/cidint-image-base-genericx86-64.wic.bmap" artifacts/image/cidint-os-0.2.0-dev-x86_64.wic.bmap
+          ls -l "$deploy"
+          # Yocto 5.0 names the link <image>-<machine>.rootfs.wic; older
+          # releases omit ".rootfs". Accept either.
+          wic=""
+          for candidate in "$deploy/cidint-image-base-genericx86-64.rootfs.wic" \
+                           "$deploy/cidint-image-base-genericx86-64.wic"; do
+            if [ -e "$candidate" ]; then wic="$candidate"; break; fi
+          done
+          if [ -z "$wic" ]; then
+            echo "::error title=Collect artifacts::no .wic image in $deploy: $(ls "$deploy" | tr '\n' ' ' | cut -c1-900)"
+            exit 1
+          fi
+          echo "::notice title=Image file::$(basename "$wic") $(stat -L -c %s "$wic") bytes"
+          cp -L "$wic" artifacts/image/cidint-os-0.2.0-dev-x86_64.wic
+          cp -L "$wic.bmap" artifacts/image/cidint-os-0.2.0-dev-x86_64.wic.bmap
           cp -L "$deploy"/cidint-image-base-genericx86-64*.spdx.tar.zst artifacts/image/ 2>/dev/null || echo "no SPDX archive found"
           (cd artifacts/image && sha256sum * | tee SHA256SUMS && ls -l)
       - name: Boot and persistence test (QEMU, UEFI)
