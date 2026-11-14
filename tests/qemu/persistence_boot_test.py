@@ -82,17 +82,30 @@ class Vm:
 
     def login(self):
         self.expect(r"login: ", LOGIN_TIMEOUT)
+        time.sleep(1)
         self.send("root")
-        time.sleep(2)
+        # Wait for the shell (or a password prompt: the development image
+        # has an empty root password) instead of guessing with a sleep.
+        m = self.expect(r"(Password: |[#$] )", 120)
+        if m.group(1).startswith("Password"):
+            self.send("")
+            self.expect(r"[#$] ", 120)
         self.send("stty -echo; export PS1=''")
-        self.run("true")
+        last = None
+        for _ in range(4):
+            try:
+                self.run("true", timeout=20)
+                return
+            except TimeoutError as e:
+                last = e
+        raise last
 
-    def run(self, command: str) -> tuple[int, str]:
+    def run(self, command: str, timeout: float = CMD_TIMEOUT) -> tuple[int, str]:
         """Run a shell command in the guest; return (exit status, output)."""
         with self.lock:
             self.buf = ""
         self.send(f"echo __BEGIN__; {command}; echo __RC=$?__")
-        m = self.expect(r"__BEGIN__\r?\n(.*?)__RC=(\d+)__", CMD_TIMEOUT)
+        m = self.expect(r"(?s)__BEGIN__\r?\n(.*?)__RC=(\d+)__", timeout)
         return int(m.group(2)), re.sub(r"\r", "", m.group(1)).strip()
 
     def kill(self):
@@ -199,6 +212,14 @@ def main() -> int:
         "error": error,
     }
     (args.workdir / "persistence-report.json").write_text(json.dumps(summary, indent=2))
+    if not passed:
+        # Show the end of the serial console so the cause is visible in CI.
+        raw = (args.workdir / "serial.log").read_text(encoding="utf-8", errors="replace")
+        clean = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]|\r", "", raw)
+        lines = [ln for ln in clean.splitlines() if ln.strip()]
+        print("--- serial console, last 34 lines ---")
+        for ln in lines[-34:]:
+            print(ln[:300])
     print(f"\n{sum(r['passed'] for r in results)}/{len(results)} checks passed")
     return 0 if passed else 1
 

@@ -61,12 +61,12 @@ python3 -m venv ~/kas-venv && ~/kas-venv/bin/pip install --upgrade pip && ~/kas-
 ~/kas-venv/bin/kas build kas/cidint-x86-64-dev.yml
 ```
 
-Output: `build/tmp/deploy/images/genericx86-64/cidint-image-base-genericx86-64.wic`
+Output: `build/tmp/deploy/images/genericx86-64/cidint-image-base-genericx86-64.rootfs.wic`
 
 ## 3. Boot and test in QEMU
 
 ```bash
-python3 tests/qemu/persistence_boot_test.py build/tmp/deploy/images/genericx86-64/cidint-image-base-genericx86-64.wic --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+python3 tests/qemu/persistence_boot_test.py build/tmp/deploy/images/genericx86-64/cidint-image-base-genericx86-64.rootfs.wic --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
 ```
 
 The script works on a copy of the image. Results:
