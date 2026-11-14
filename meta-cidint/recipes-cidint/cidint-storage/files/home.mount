@@ -1,0 +1,17 @@
+[Unit]
+Description=CIDINT persistent user data (/home on the data volume)
+DefaultDependencies=no
+Requires=cidint-data-setup.service
+After=cidint-data-setup.service
+Before=local-fs.target umount.target
+Conflicts=umount.target
+ConditionPathIsDirectory=/data/home
+
+[Mount]
+What=/data/home
+Where=/home
+Type=none
+Options=bind
+
+[Install]
+WantedBy=local-fs.target

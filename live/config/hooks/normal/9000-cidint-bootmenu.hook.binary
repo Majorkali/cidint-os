@@ -1,8 +1,0 @@
-#!/bin/sh
-# Runs in the finished binary/ tree just before the ISO is assembled:
-# rebrand the boot menus and add the encrypted-persistence entry.
-# Never fails the build: a stock boot menu is better than no image.
-echo "CIDINT: boot menu files present:"
-find . -maxdepth 3 \( -name '*.cfg' -o -name 'theme.txt' \) | sort
-python3 ../../tools/patch-bootloaders.py . || echo "CIDINT: boot menu patch failed; menus left stock"
-exit 0

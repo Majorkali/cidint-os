@@ -1,0 +1,19 @@
+[Unit]
+Description=CIDINT data volume layout
+Documentation=https://github.com/Majorkali/cidint-os/blob/main/docs/PERSISTENCE.md
+DefaultDependencies=no
+RequiresMountsFor=/data
+Before=local-fs.target home.mount
+# Do nothing if the data volume is missing or read-only; home.mount then
+# fails visibly instead of silently writing to a temporary location.
+ConditionPathIsReadWrite=/data
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# mkdir -p only creates what is missing; existing data is never touched.
+ExecStart=/bin/mkdir -p /data/config /data/home /data/apps /data/server /data/state /data/backup
+ExecStart=/bin/mkdir -p -m 0700 /data/home/root /data/state/cidint
+
+[Install]
+WantedBy=local-fs.target

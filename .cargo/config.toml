@@ -1,0 +1,3 @@
+[resolver]
+# Prefer dependency versions that still build with the workspace rust-version.
+incompatible-rust-versions = "fallback"

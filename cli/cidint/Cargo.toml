@@ -1,0 +1,18 @@
+[package]
+name = "cidint"
+description = "CIDINT Command Intelligence (CCI): the CIDINT OS command-line interface"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "cidint"
+path = "src/main.rs"
+
+[dependencies]
+cidint-core = { path = "../../services/cidint-core" }
+clap = { version = "4", default-features = false, features = ["std", "derive", "env", "help", "usage", "error-context", "suggestions"] }
+clap_complete = { version = "4", default-features = false }
+serde_json.workspace = true

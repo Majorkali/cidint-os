@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["services/cidint-core", "cli/cidint"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+# Yocto 5.0 LTS (scarthgap) ships rustc 1.75; the code must build with it.
+rust-version = "1.75"
+license = "Apache-2.0"
+repository = "https://github.com/Majorkali/cidint-os"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[profile.release]
+opt-level = 2
+debug = false
+overflow-checks = true

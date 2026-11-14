@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      build_image:
+        description: "Build and boot-test the Yocto image (several hours)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.toolchain }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, "1.75.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          rustup toolchain install ${{ matrix.toolchain }} --profile minimal --component clippy,rustfmt
+          rustup default ${{ matrix.toolchain }}
+      - name: Format
+        if: matrix.toolchain == 'stable'
+        run: cargo fmt --all -- --check
+      - name: Lint
+        if: matrix.toolchain == 'stable'
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Crate list matches Cargo.lock
+        run: python3 scripts/gen-crates-inc.py --check
+      - name: CLI on real Linux
+        run: |
+          cargo run -q -p cidint --locked -- hardware inventory --json
+          cargo run -q -p cidint --locked -- system info
+
+  image:
+    name: Yocto image + QEMU persistence test
+    if: github.event_name == 'workflow_dispatch' && inputs.build_image
+    needs: rust
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+      - name: Host packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gawk wget git diffstat unzip texinfo gcc build-essential chrpath socat cpio \
+            python3 python3-pip python3-pexpect xz-utils debianutils iputils-ping \
+            python3-git python3-jinja2 python3-subunit zstd liblz4-tool file locales \
+            libacl1 qemu-system-x86 ovmf
+          sudo locale-gen en_US.UTF-8
+          pip3 install --user kas==4.8.2
+      - name: Restore build caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/downloads
+            build/sstate-cache
+          key: yocto-scarthgap-${{ hashFiles('kas/*.yml', 'Cargo.lock') }}
+          restore-keys: yocto-scarthgap-
+      - name: Build image
+        env:
+          LANG: en_US.UTF-8
+        run: ~/.local/bin/kas build kas/cidint-x86-64-dev.yml
+      - name: Collect artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/image
+          deploy=build/tmp/deploy/images/genericx86-64
+          cp -L "$deploy/cidint-image-base-genericx86-64.wic" artifacts/image/cidint-os-0.2.0-dev-x86_64.wic
+          cp -L "$deploy/cidint-image-base-genericx86-64.wic.bmap" artifacts/image/cidint-os-0.2.0-dev-x86_64.wic.bmap
+          cp -L "$deploy"/cidint-image-base-genericx86-64*.spdx.tar.zst artifacts/image/ 2>/dev/null || echo "no SPDX archive found"
+          (cd artifacts/image && sha256sum * | tee SHA256SUMS && ls -l)
+      - name: Boot and persistence test (QEMU, UEFI)
+        run: |
+          sudo chmod 666 /dev/kvm || true
+          python3 tests/qemu/persistence_boot_test.py \
+            artifacts/image/cidint-os-0.2.0-dev-x86_64.wic \
+            --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-test-evidence
+          path: |
+            artifacts/qemu-test/serial.log
+            artifacts/qemu-test/persistence-report.json
+      - name: Compress image
+        run: zstd -T0 --rm artifacts/image/cidint-os-0.2.0-dev-x86_64.wic
+      - name: Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: cidint-os-dev-image
+          path: artifacts/image/

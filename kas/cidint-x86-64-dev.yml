@@ -1,0 +1,39 @@
+# CIDINT OS development image for x86_64 UEFI machines and QEMU.
+#
+#   pip install kas==4.8.2
+#   kas build kas/cidint-x86-64-dev.yml
+#
+# DEVELOPMENT BUILD: root has an empty password (debug-tweaks) so the
+# automated boot test can log in on the serial console. Never ship this.
+header:
+  version: 14
+
+machine: genericx86-64
+distro: cidint
+target: cidint-image-base
+
+repos:
+  # This repository (the directory containing kas/).
+  cidint:
+    layers:
+      meta-cidint:
+
+  # Yocto Project 5.0 LTS "scarthgap", pinned to an exact commit.
+  # Resolved from refs/heads/scarthgap on 2026-11-14. Update deliberately,
+  # and record the change in docs/RELEASE notes.
+  poky:
+    url: https://git.yoctoproject.org/poky
+    branch: scarthgap
+    commit: 6b7c1066f778db5a6b3e35400617b10342988fa8
+    layers:
+      meta:
+      meta-poky:
+      meta-yocto-bsp:
+
+local_conf_header:
+  cidint-dev: |
+    EXTRA_IMAGE_FEATURES += "debug-tweaks"
+    # Keep disk usage within a hosted CI runner.
+    INHERIT += "rm_work"
+    BB_NUMBER_THREADS ?= "${@oe.utils.cpu_count()}"
+    PARALLEL_MAKE ?= "-j ${@oe.utils.cpu_count()}"

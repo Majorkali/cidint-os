@@ -1,5 +1,17 @@
-out/
-__pycache__/
-*.pyc
+# Build outputs stay out of the source tree's history.
+/target/
+/build/
+/artifacts/*
+!/artifacts/README.md
+/kas/*.lock.yml.tmp
 *.iso
-.claude/
+*.wic
+*.wic.*
+*.qcow2
+
+# Never commit keys or credentials.
+*.key
+*.pem
+*.p12
+/security/keys/private/
+.env

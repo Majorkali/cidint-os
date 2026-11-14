@@ -1,6 +1,0 @@
-[Greeter]
-WallpaperPlugin=org.kde.image
-
-[Greeter][Wallpaper][org.kde.image][General]
-Image=/usr/share/cidint/wallpaper.svg
-PreviewImage=/usr/share/cidint/wallpaper.svg

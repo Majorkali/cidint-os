@@ -1,178 +1,87 @@
 # CIDINT OS
 
 **Cyber Intelligence, Defense, Innovation & Network Technology Operating System**
-Secure. Anonymous. Intelligent. Adaptive.
+*Intelligence Beyond Limits.*
 
-CIDINT OS is a hardened, privacy-first Linux distribution: a live system that boots
-from USB or ISO, forgets everything at shutdown unless you opt in to encrypted
-persistence, isolates your activities in compartments, can force all traffic through
-Tor, installs software from other ecosystems through one engine, and tunes itself to
-the hardware it finds.
+> **Status: 0.2.0 "foundation", development. Not production-ready.**
+> What exists today is the persistence and tooling foundation, tested on a
+> development host, plus a Yocto image definition that **has not been built
+> or booted yet**. There is no desktop, no installer and no ISO in this
+> release. The exact state of every feature is in [docs/STATUS.md](docs/STATUS.md);
+> the same list is printed by `cidint features`.
 
-This folder is the complete source of the OS and the system that builds its ISO.
+## What CIDINT OS is
 
-> **Status: version 0.1, development build.**
-> The amd64 ISO builds on GitHub Actions and has been boot-tested in VirtualBox: the
-> desktop, both daemons, Anonymous Mode (Tor exit confirmed, non-Tor traffic blocked),
-> the sandbox, the application engine and the Control Center all ran. It has not been
-> tested on physical hardware, with UEFI Secure Boot, or with encrypted persistence,
-> and nothing has been security-audited. Do not trust it with your safety yet.
+A security-focused, persistent operating system built with the Yocto Project
+on the upstream Linux LTS kernel. CIDINT does not own the kernel, and it is
+not a renamed copy of another distribution: the image recipes, storage
+layout, system services, command line, policies, tests and release process
+in this repository are CIDINT's own work. Upstream components are used under
+their licences and listed in the SBOM that each image build produces.
 
-## What it is built on
+The first rule of the design is that data is not lost on restart:
 
-CIDINT OS is a distribution on top of Debian 13 and the Linux kernel, the same approach
-Tails, Qubes OS, Kali and Whonix take. A brand-new kernel could not run existing
-`.deb`, `.rpm` or `.exe` software or drive real hardware, so the original work here is
-the CIDINT layer:
+- the system image is read-only and lives in its own partition slot;
+- everything that must survive lives on a separate `/data` volume that an
+  update never formats;
+- CIDINT's own state is written with a write-ahead log and atomic replacement,
+  so an interrupted write is detected and rolled back to the last commit;
+- a backup counts only after its content has been re-read and verified.
 
-| Component | Where | What it does |
+## What works today
+
+| Component | Location | Evidence |
 |---|---|---|
-| `cidint` CLI | `usr/bin/cidint`, `cli.py` | One command for every subsystem |
-| Control Center | `control_center.py` | Graphical security dashboard, live graphs, domains, apps, assistant |
-| UAEE | `uaee.py` | Universal Application Execution Engine |
-| Domains | `domains.py`, `sandbox.py` | Isolated compartments, disposable environments, throwaway VMs |
-| Anonymous Mode | `anon.py`, `nft-anon.nft` | Transparent Tor routing, fail-closed, kill switch |
-| Hardware engine | `hwadapt.py` | Hardware inventory, load forecasting, adaptive tuning |
-| Sentinel | `sentinel.py` | Behavioural threat detection and containment |
-| Assistant | `assistant.py` | Offline natural-language control |
+| Crash-consistent state store | `services/cidint-core/src/store.rs` | unit tests: torn write, bit flip, interrupted checkpoint |
+| Atomic durable file replacement | `services/cidint-core/src/atomic.rs` | unit test |
+| Versioned, deduplicating backup with verified restore | `services/cidint-core/src/backup.rs` | unit + CLI tests |
+| Tamper-evident audit log | `services/cidint-core/src/audit.rs` | unit + CLI tests |
+| Persistence-mode and volume checker | `services/cidint-core/src/layout.rs` | parser tests on mount-table fixtures |
+| `cidint` CLI (JSON, dry-run, stable exit codes, completions) | `cli/cidint` | 9 end-to-end tests on the built binary |
 
-(Paths are under `live/config/includes.chroot/usr/lib/cidint/cidint/`.)
+Written but **not yet run** (needs the first CI image build): the Yocto layer
+`meta-cidint`, the A/B + data disk layout, the `/home`-on-`/data` units, the
+hardware inventory on a live system, and the QEMU reboot/power-loss test.
 
-## Building the ISO
-
-You need a Linux environment, about 25 GB of free disk, and a network connection.
-The build takes 30 to 90 minutes and produces `out/cidint-os-amd64.iso` (roughly 4 to
-6 GB, far below the 15 GB limit, which the build enforces).
-
-**On Windows (WSL2):**
-
-```powershell
-powershell -ExecutionPolicy Bypass -File build.ps1
-```
-
-If WSL is not installed or is broken, fix it once from an Administrator PowerShell with
-`wsl --install -d Debian`, reboot, and run the script again.
-
-**On Linux (Debian or Ubuntu):**
+## Try the CLI
 
 ```bash
-sudo bash build.sh
+cargo test --workspace
 ```
-
-**In the cloud:** push this folder to a GitHub repository and run the
-*Build CIDINT OS ISO* workflow. It builds amd64 and arm64 images as artifacts.
-
-## Booting
-
-- **USB:** write the ISO with Rufus (choose *DD image mode*), balenaEtcher, or `dd`.
-- **Virtual machine:** attach the ISO to VirtualBox, VMware, Hyper-V or QEMU/KVM
-  with at least 4 GB of RAM and 2 CPUs.
-
-The boot menu offers *CIDINT OS (amnesic)*, where nothing is written to disk, and
-*CIDINT OS (encrypted persistence)*, which unlocks a LUKS2 volume you created with
-`sudo cidint persist create /dev/sdXN --yes-destroy-data`.
-
-## Default account
-
-The live user is **`cidint`** with password **`cidint`** (needed for the lock screen and
-for authentication prompts). The desktop logs in automatically.
-
-This password is public knowledge, exactly like the default on other live systems. It
-is acceptable for an amnesic session with no remote login service running. If you use
-encrypted persistence, change it straight away with `passwd`.
-
-## Using it
 
 ```bash
-cidint status                       # security posture score and checks
-cidint center                       # open the Control Center
-
-cidint anon on                      # force all traffic through Tor
-cidint lockdown on                  # kill switch: block all network traffic
-cidint panic --poweroff             # emergency: block, lock, power off
-
-cidint domain list
-cidint domain run banking -- firefox-esr --no-remote
-cidint domain disposable -- firefox-esr --no-remote     # destroyed on exit
-cidint domain vm suspicious.iso     # throwaway virtual machine
-
-cidint app inspect setup.exe        # what is it, will it run, is it clean
-cidint app install program.AppImage # scan, isolate, add to launcher
-cidint app run script.sh            # run once in a disposable sandbox
-
-cidint session save                 # continue these apps after the next login/reboot
-cidint session restore              # reopen the last saved session now
-
-cidint hw status                    # hardware and adaptive tuning
-cidint sentinel events              # behavioural detections
-cidint ask "why is my system slow"  # natural-language control
+cargo run -p cidint -- features
 ```
-
-Double-clicking a package or installer in the file manager opens the same engine.
-
-## Feature status, honestly
-
-**Implemented in this release**
-
-- Live ISO, bootable from USB, amnesic by default; optional LUKS2 + Argon2id persistence
-- Kernel hardening (memory zeroing, ASLR tuning, restricted kernel interfaces, module
-  blacklist), AppArmor, deny-inbound firewall, compressed RAM swap only (never on disk)
-- Anonymous Mode: all TCP and DNS through Tor, everything else blocked, fail-closed
-- MAC address randomisation, no hostname in DHCP, no connectivity pings
-- Domains with private storage and per-domain network policy; disposable compartments;
-  throwaway KVM virtual machines
-- UAEE: identifies files by content, hashes, malware-scans, checks architecture and
-  installs or runs DEB, RPM, AppImage, Flatpak, Snap, source archives, shell scripts,
-  Windows EXE/MSI/BAT (Wine), JAR, APK (Waydroid), foreign-CPU Linux binaries (QEMU)
-- Hardware engine: detection, Holt forecasting, power profile / I/O scheduler / VM tuning
-- Sentinel: per-program statistical baselines plus attack heuristics, optional freezing
-- Offline assistant, Control Center, CIDINT Dark theme, wallpaper
-- amd64 and arm64 builds
-
-**Provided by the Debian base and included, not written here**
-
-Wine, Tor, QEMU/KVM, Flatpak, Podman, KDE Plasma, LUKS, WireGuard, OpenVPN, FIDO2 and
-TPM tooling, compilers and language toolchains, Btrfs/XFS/LVM/RAID tools.
-
-**Not done, and what would be needed**
-
-| Wanted | Reality |
-|---|---|
-| Qubes-grade isolation | Domains use kernel namespaces. A kernel exploit crosses them. True Qubes-style isolation needs a Xen-based architecture, which is a different OS design. |
-| Guaranteed anonymity | Not possible for any system. Tor resists network observers, not a global adversary, a compromised endpoint, or your own mistakes. |
-| "Military grade" | A marketing term. The cryptography is standard and strong (AES-256, Argon2id, X25519/Ed25519 in the base), but nothing here has been audited or certified. |
-| macOS and iOS apps | Cannot run: no workable compatibility layer exists and Apple's licences forbid it. They are identified and refused with an explanation. |
-| iOS / BlackBerry hardware | Locked bootloaders; no third-party OS can be installed on them. |
-| RISC-V, POWER, s390x, MIPS, LoongArch images | Debian supports several of these, but live-image tooling here targets amd64 and arm64 only. |
-| Signed Secure Boot chain of our own | The image relies on Debian's signed shim, GRUB and kernel. Own keys, measured boot and remote attestation are future work. |
-| Local LLM assistant | The assistant is a keyword intent engine. A local model (llama.cpp) can be added behind the same interface. |
-| Post-quantum cryptography | Depends on the base OpenSSL/OpenSSH versions; nothing CIDINT-specific is implemented. |
-| Installer to hard disk, immutable base, A/B updates | Not implemented. This release is live-only. |
-| Voice control, gestures, cloud sync, remote desktop, AI firewall | Not implemented. |
-| Clipboard isolation between domains | Not enforced under Wayland compartments sharing the compositor socket. |
-
-## Known rough edges to check on first boot
-
-- Package names in `optional-packages.list` that Debian does not ship are skipped; the
-  list of skipped ones is saved in `/usr/share/cidint/optional-missing.txt`.
-- The live user has passwordless `sudo`, as on a standard Debian live image.
-- Anonymous Mode redirects IPv4 only and blocks IPv6 entirely.
-- The Control Center and the desktop theme have not been seen running yet.
-
-## Tests
 
 ```bash
-python -m unittest discover -s tests -v
+cargo run -p cidint -- --state-dir ./demo-state config set theme/name obsidian-command
 ```
 
-## Layout
+Commands that need a running Linux system (`hardware inventory`,
+`persistence status`) exit with code 3 elsewhere instead of inventing data.
 
-```
-build.ps1 / build.sh        build the ISO (Windows / Linux)
-tools/patch-bootloaders.py  boot menu branding and persistence entry
-live/auto/config            live-build configuration, kernel hardening flags
-live/config/package-lists/  core packages
-live/config/hooks/          image customisation at build time
-live/config/includes.chroot files copied into the OS (the CIDINT layer)
-tests/                      automated tests
-```
+## Building the image
+
+Image builds need Linux and run on GitHub Actions (workflow **CI**, option
+*build_image*). See [docs/BUILDING.md](docs/BUILDING.md).
+
+## Documentation
+
+- [docs/STATUS.md](docs/STATUS.md) - feature status, roadmap, release gates
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - design and decisions
+- [docs/PERSISTENCE.md](docs/PERSISTENCE.md) - storage layout and guarantees
+- [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) - what is and is not defended
+- [docs/BUILDING.md](docs/BUILDING.md) - toolchain, image build, QEMU
+- [docs/TESTING.md](docs/TESTING.md) - test plan and recorded results
+
+## History
+
+Version 0.1 was a Debian live-build prototype with Python tooling. It was
+retired because CIDINT must be an independently built system rather than a
+re-spin of a distribution. Its source remains in git history (commit
+`317cbda` and earlier).
+
+## Licence
+
+CIDINT-owned code is licensed under Apache-2.0 ([LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt)).
+Upstream components keep their own licences.
