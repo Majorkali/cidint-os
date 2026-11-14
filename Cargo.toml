@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
 members = ["services/cidint-core", "cli/cidint"]
+# The Yocto build tree and the poky checkout live under this directory and
+# contain Cargo packages of their own (rustc's bootstrap, among others).
+# Without this, Cargo walks up from them and claims them for this workspace.
+exclude = ["build", "poky"]
 
 [workspace.package]
 version = "0.2.0"

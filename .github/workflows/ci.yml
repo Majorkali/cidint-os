@@ -85,17 +85,29 @@ jobs:
           scripts/ci-run.sh "kas --version" "$HOME/kas-venv/bin/kas" --version
           ls -l /usr/share/OVMF/
       - name: Restore build caches
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             build/downloads
             build/sstate-cache
-          key: yocto-scarthgap-${{ hashFiles('kas/*.yml', 'Cargo.lock') }}
+          key: yocto-scarthgap-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: yocto-scarthgap-
       - name: Build image
+        # Stops before the job limit so the cache below is still saved.
+        timeout-minutes: 310
         env:
           LANG: en_US.UTF-8
         run: scripts/ci-run.sh "kas build" "$HOME/kas-venv/bin/kas" build kas/cidint-x86-64-dev.yml
+      - name: Save build caches
+        # Also after a failed or timed-out build: finished tasks are reused
+        # by the next run instead of being compiled again.
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/downloads
+            build/sstate-cache
+          key: yocto-scarthgap-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Collect artifacts
         run: |
           set -euo pipefail
