@@ -110,6 +110,18 @@ pub const FEATURES: &[Feature] = &[
         "rule set and QEMU traffic test written; results in docs/TESTING.md",
     ),
     f(
+        "server",
+        "Server Edition image: key-only SSH, host key and authorised keys on /data",
+        Untested,
+        "image and QEMU network test written; results in docs/TESTING.md",
+    ),
+    f(
+        "desktop",
+        "Graphical session preview (Weston, software rendering, no login screen)",
+        Untested,
+        "image, live ISO and QEMU screen test written; not the planned NOVA desktop",
+    ),
+    f(
         "security",
         "Root password set at installation",
         Untested,

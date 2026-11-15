@@ -125,7 +125,8 @@ jobs:
           iso="$(pick 'cidint-image-live-genericx86-64*.iso')"
           srv="$(pick 'cidint-image-server-genericx86-64*.wic')"
           dsk="$(pick 'cidint-image-desktop-genericx86-64*.wic')"
-          if [ -z "$wic" ] || [ -z "$iso" ] || [ -z "$srv" ] || [ -z "$dsk" ]; then
+          dsl="$(pick 'cidint-image-desktop-live-genericx86-64*.iso')"
+          if [ -z "$wic" ] || [ -z "$iso" ] || [ -z "$srv" ] || [ -z "$dsk" ] || [ -z "$dsl" ]; then
             echo "::error title=Collect artifacts::wic='$wic' iso='$iso' server='$srv' in $deploy: $(ls "$deploy" | tr '\n' ' ' | cut -c1-900)"
             exit 1
           fi
@@ -134,6 +135,7 @@ jobs:
           cp -L "$iso" artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso
           cp -L "$srv" artifacts/image/cidint-os-${CIDINT_VERSION}-server-x86_64.wic
           cp -L "$dsk" artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-x86_64.wic
+          cp -L "$dsl" artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-live-x86_64.iso
           cp -L "$deploy"/cidint-image-base-genericx86-64*.spdx.tar.zst artifacts/image/ 2>/dev/null || echo "no SPDX archive found"
           ls -l artifacts/image
           echo "::notice title=Image files::$(cd artifacts/image && stat -c '%n %s bytes' * | tr '\n' ';')"
@@ -195,6 +197,14 @@ jobs:
             artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-x86_64.wic \
             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: Desktop live ISO, graphical session from the live medium (QEMU, UEFI)
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        run: |
+          scripts/ci-run.sh "QEMU desktop live test" python3 tests/qemu/desktop_test.py \
+            artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-live-x86_64.iso \
+            --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd \
+            --cdrom --workdir artifacts/qemu-test/desktop-live
       - name: Test summary
         if: always()
         run: |
@@ -211,6 +221,9 @@ jobs:
             artifacts/qemu-test/**/*report.json
             artifacts/qemu-test/**/*.png
       - name: Compress disk image and write checksums
+        # Images are published whenever they were built; the test summary
+        # of the same run says which suites passed.
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
         run: |
           set -euo pipefail
           zstd -T0 --rm artifacts/image/cidint-os-${CIDINT_VERSION}-x86_64.wic
@@ -221,6 +234,7 @@ jobs:
           cat SHA256SUMS
           echo "::notice title=SHA256SUMS::$(tr '\n' ';' < SHA256SUMS)"
       - name: Upload images
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: cidint-os-images

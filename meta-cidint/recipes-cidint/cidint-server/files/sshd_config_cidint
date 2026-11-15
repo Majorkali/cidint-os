@@ -4,7 +4,10 @@
 HostKey /data/server/ssh/ssh_host_ed25519_key
 
 PubkeyAuthentication yes
-AuthorizedKeysFile .ssh/authorized_keys
+# Authorised keys are configuration and live on the data volume, one file
+# per account, writable by root only. (root's own home directory is on
+# the read-only system image.)
+AuthorizedKeysFile /data/config/ssh/authorized_keys/%u
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitEmptyPasswords no

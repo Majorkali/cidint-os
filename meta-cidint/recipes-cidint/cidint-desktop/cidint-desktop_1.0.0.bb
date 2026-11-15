@@ -7,6 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 SRC_URI = "\
     file://weston.ini \
+    file://wallpaper.png \
     file://seatd.service \
     file://cidint-desktop.service \
 "
@@ -26,8 +27,12 @@ USERADD_PARAM:${PN} = "--uid 1000 --user-group --home-dir /home/cidint --no-crea
 do_install() {
     install -d ${D}${sysconfdir}/cidint ${D}${systemd_system_unitdir}
     install -m 0644 ${WORKDIR}/weston.ini ${D}${sysconfdir}/cidint/weston.ini
+    install -d ${D}${datadir}/cidint
+    install -m 0644 ${WORKDIR}/wallpaper.png ${D}${datadir}/cidint/wallpaper.png
     install -m 0644 ${WORKDIR}/seatd.service ${D}${systemd_system_unitdir}/
     install -m 0644 ${WORKDIR}/cidint-desktop.service ${D}${systemd_system_unitdir}/
 }
+
+FILES:${PN} += "${datadir}/cidint"
 
 RDEPENDS:${PN} = "weston seatd liberation-fonts xkeyboard-config cidint-storage"

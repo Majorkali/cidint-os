@@ -103,8 +103,10 @@ def main() -> int:
             step("firewall: SSH rule loaded, default still drop",
                  "cidint-server-ssh" in out and out.count("policy drop") == 2, out)
 
-            vm.run("mkdir -p /home/root/.ssh && chmod 700 /home/root/.ssh && "
-                   f"echo '{pubkey}' > /home/root/.ssh/authorized_keys && chmod 600 /home/root/.ssh/authorized_keys")
+            vm.run("mkdir -p /data/config/ssh/authorized_keys && chmod 755 /data/config/ssh "
+                   "/data/config/ssh/authorized_keys && "
+                   f"echo '{pubkey}' > /data/config/ssh/authorized_keys/root && "
+                   "chmod 644 /data/config/ssh/authorized_keys/root")
             rc, boot_id = vm.run("cat /proc/sys/kernel/random/boot_id")
 
             p = ssh(["-i", str(key), "-o", "IdentitiesOnly=yes"], "cat /proc/sys/kernel/random/boot_id")
@@ -113,8 +115,8 @@ def main() -> int:
             if not ok:
                 # Say why the daemon refused, as seen from inside the guest.
                 rc, why = vm.run("journalctl -b --no-pager -o cat | grep -i sshd | tail -n 8; "
-                                 "ls -ldn / /data /data/home /home /home/root /home/root/.ssh "
-                                 "/home/root/.ssh/authorized_keys; wc -c /home/root/.ssh/authorized_keys; "
+                                 "ls -ldn / /data /data/config /data/config/ssh /data/config/ssh/authorized_keys "
+                                 "/data/config/ssh/authorized_keys/root; "
                                  "grep '^root:' /etc/passwd; cut -d: -f1,2 /etc/shadow | head -n 1 | cut -c1-12")
                 detail += " | guest: " + why
             step("SSH: key-based login over the network reaches this guest", ok, detail)

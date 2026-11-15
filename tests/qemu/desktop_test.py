@@ -30,7 +30,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from persistence_boot_test import Vm, system_state  # noqa: E402
 
-BACKGROUND = (0x0B, 0x1F, 0x33)
+SAMPLES = json.loads((HERE / "wallpaper-samples.json").read_text())["points"]
 
 
 class Qmp:
@@ -82,13 +82,15 @@ def main() -> int:
     ap.add_argument("--ovmf-code", type=Path, required=True)
     ap.add_argument("--ovmf-vars", type=Path, required=True)
     ap.add_argument("--workdir", type=Path, default=Path("artifacts/qemu-test/desktop"))
+    ap.add_argument("--cdrom", action="store_true", help="the image is a live ISO; boot it as a CD-ROM")
     args = ap.parse_args()
 
     args.workdir.mkdir(parents=True, exist_ok=True)
     work = args.workdir.resolve()
     disk = work / "disk.wic"
     nvram = work / "OVMF_VARS.fd"
-    shutil.copyfile(args.image, disk)
+    if not args.cdrom:
+        shutil.copyfile(args.image, disk)
     shutil.copyfile(args.ovmf_vars, nvram)
     qmp_path = f"/tmp/cidint-desktop-qmp-{os.getpid()}.sock"
 
@@ -113,10 +115,18 @@ def main() -> int:
         ppm.unlink()
         return w, h, rgb
 
-    def share(rgb: bytes, colour) -> float:
-        counts = Counter(rgb[i:i + 3] for i in range(0, len(rgb), 3 * 7))  # every 7th pixel
-        total = sum(counts.values())
-        hit = sum(n for c, n in counts.items() if near(tuple(c), colour))
+    def wallpaper_match(w: int, h: int, rgb: bytes) -> float:
+        """Share of reference points (below the panel) where the screen
+        shows the wallpaper's colour. The wallpaper is stretched to the
+        screen, so relative positions correspond."""
+        hit = total = 0
+        for p in SAMPLES:
+            if p["v"] < 0.08:
+                continue
+            x, y = min(w - 1, int(p["u"] * w)), min(h - 1, int(p["v"] * h))
+            i = (y * w + x) * 3
+            total += 1
+            hit += near(tuple(rgb[i:i + 3]), tuple(p["rgb"]), tol=16)
         return hit / total if total else 0.0
 
     def diagnostics(vm) -> str:
@@ -130,7 +140,7 @@ def main() -> int:
     with open(log_path, "w", encoding="utf-8") as log:
         vm = None
         try:
-            vm = Vm(disk, args.ovmf_code, nvram, log,
+            vm = Vm(args.image if args.cdrom else disk, args.ovmf_code, nvram, log, cdrom=args.cdrom,
                     nic=["-nic", "none", "-qmp", f"unix:{qmp_path},server=on,wait=off"])
             qmp = Qmp(qmp_path)
             vm.login()
@@ -157,9 +167,11 @@ def main() -> int:
 
             time.sleep(5)
             w, h, before = screenshot(qmp, "desktop")
-            bg = share(before, BACKGROUND)
-            step("screen: the desktop background colour fills most of the display", bg > 0.5,
-                 f"{w}x{h}, background share {bg:.2f}\n" + (diagnostics(vm) if bg <= 0.5 else ""))
+            bg = wallpaper_match(w, h, before)
+            colours = len(Counter(before[i:i + 3] for i in range(0, len(before), 3 * 11)))
+            step("screen: the CIDINT wallpaper is displayed", bg > 0.85 and colours > 50,
+                 f"{w}x{h}, {bg:.2f} of reference points match, {colours} colours\n"
+                 + (diagnostics(vm) if bg <= 0.85 else ""))
 
             vm.run(f"su -s /bin/sh cidint -c 'XDG_RUNTIME_DIR=/run/cidint-session WAYLAND_DISPLAY={sock} "
                    "weston-terminal >/dev/null 2>&1 &'")
