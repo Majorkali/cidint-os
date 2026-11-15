@@ -1,0 +1,2 @@
+# CIDINT OS Server Edition: allow inbound SSH.
+tcp dport 22 accept comment "cidint-server-ssh"

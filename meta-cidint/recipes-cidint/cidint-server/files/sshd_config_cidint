@@ -1,0 +1,19 @@
+# CIDINT OS Server Edition: SSH daemon configuration.
+# Key-based logins only. The host key lives on the data volume so that it
+# survives restarts and system updates (the system image is read-only).
+HostKey /data/server/ssh/ssh_host_ed25519_key
+
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PermitRootLogin prohibit-password
+
+X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+MaxAuthTries 3
+LoginGraceTime 30
+
+Subsystem sftp internal-sftp

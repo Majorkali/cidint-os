@@ -21,6 +21,9 @@ table inet cidint_filter {
         udp sport 67 udp dport 68 accept
         ip6 saddr fe80::/10 udp dport 546 accept
 
+        # Rules added by editions and services (one file per service).
+        include "/etc/cidint/firewall.d/*.nft"
+
         counter drop comment "cidint-default-deny"
     }
 

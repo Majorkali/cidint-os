@@ -16,7 +16,7 @@ inherit systemd
 SYSTEMD_SERVICE:${PN} = "cidint-firewall.service"
 
 do_install() {
-    install -d ${D}${sysconfdir}/cidint ${D}${systemd_system_unitdir}
+    install -d ${D}${sysconfdir}/cidint/firewall.d ${D}${systemd_system_unitdir}
     install -m 0644 ${WORKDIR}/firewall.nft ${D}${sysconfdir}/cidint/firewall.nft
     install -m 0644 ${WORKDIR}/cidint-firewall.service ${D}${systemd_system_unitdir}/
 }
