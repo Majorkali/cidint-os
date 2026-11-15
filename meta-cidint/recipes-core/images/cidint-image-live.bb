@@ -8,7 +8,8 @@ when the session ends. Console only."
 IMAGE_FSTYPES = "iso"
 
 # Tell the system which persistence contract applies (docs/PERSISTENCE.md).
-APPEND:append = " cidint.mode=amnesic"
+# "ro": the system image sits on a read-only medium and is mounted read-only.
+APPEND:append = " ro cidint.mode=amnesic"
 
 # Only a live boot entry. The Yocto reference installer is not offered:
 # it would lay out a disk without the CIDINT data volume. Installation is
