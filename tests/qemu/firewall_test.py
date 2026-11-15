@@ -30,7 +30,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from persistence_boot_test import Vm  # noqa: E402
+from persistence_boot_test import Vm, system_state  # noqa: E402
 
 GUEST_PORT = 5555
 
@@ -134,8 +134,8 @@ def main() -> int:
             step("inbound: a connection to a guest port is dropped by the default-deny rule",
                  before is not None and after is not None and after > before, f"counter {before} -> {after}")
 
-            rc, out = vm.run("systemctl is-system-running")
-            step("no failed units", out in ("running", "starting"), out)
+            ok, out = system_state(vm)
+            step("no failed units", ok, out)
 
             vm.send("systemctl poweroff")
             vm.wait_exit(180)

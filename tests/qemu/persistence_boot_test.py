@@ -142,6 +142,20 @@ class Vm:
         self.proc.wait(timeout=timeout)
 
 
+def system_state(vm) -> tuple[bool, str]:
+    """True if no unit failed; otherwise name the failed units and show
+    the end of their logs, so a CI failure explains itself."""
+    rc, out = vm.run("systemctl is-system-running")
+    if out in ("running", "starting"):
+        return True, out
+    rc, failed = vm.run("systemctl --failed --no-legend --plain | cut -d' ' -f1")
+    detail = f"{out}; failed units: {failed}"
+    for unit in failed.split()[:3]:
+        rc, journal = vm.run(f"journalctl -b -u {unit} --no-pager -o cat | tail -n 12")
+        detail += f"\n[{unit}]\n{journal}"
+    return False, detail
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("image", type=Path)
@@ -231,8 +245,8 @@ def main() -> int:
             step("power loss: audit chain verifies", rc == 0, out)
             rc, out = vm.run("cat /home/root/kept.txt")
             step("power loss: user file intact", rc == 0 and out == "cidint acceptance file", out)
-            rc, out = vm.run("systemctl is-system-running")
-            step("no failed units after recovery boot", out in ("running", "starting"), out)
+            ok, out = system_state(vm)
+            step("no failed units after recovery boot", ok, out)
 
             vm.send("systemctl poweroff")
             vm.wait_exit(180)

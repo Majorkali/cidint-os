@@ -112,6 +112,7 @@ jobs:
           path: build/sstate-cache
           key: yocto-sstate-scarthgap-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Collect artifacts
+        id: collect
         run: |
           set -euo pipefail
           mkdir -p artifacts/image
@@ -140,15 +141,21 @@ jobs:
             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
       - name: Boot and amnesic test, live ISO (QEMU, UEFI)
+        # Also after an earlier test failed: every result is wanted.
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
         run: |
           scripts/ci-run.sh "QEMU live ISO test" python3 tests/qemu/live_boot_test.py \
             artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso \
             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
       - name: Install to a blank disk, then persistence test (QEMU, UEFI)
+        # Also after an earlier test failed: every result is wanted.
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
         run: |
           scripts/ci-run.sh "QEMU install test" python3 tests/qemu/install_test.py             artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
       - name: Encrypted install, unlock at boot, persistence test (QEMU, UEFI)
+        # Also after an earlier test failed: every result is wanted.
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
         run: |
           scripts/ci-run.sh "QEMU encrypted install test" python3 tests/qemu/install_test.py \
             artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso \
@@ -156,6 +163,8 @@ jobs:
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd \
             --encrypt --workdir artifacts/qemu-test/encrypted
       - name: Firewall test with real traffic (QEMU, UEFI)
+        # Also after an earlier test failed: every result is wanted.
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
         run: |
           scripts/ci-run.sh "QEMU firewall test" python3 tests/qemu/firewall_test.py \
             artifacts/image/cidint-os-${CIDINT_VERSION}-x86_64.wic \

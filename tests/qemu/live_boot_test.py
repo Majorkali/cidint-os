@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from persistence_boot_test import Vm  # noqa: E402
+from persistence_boot_test import Vm, system_state  # noqa: E402
 
 
 def main() -> int:
@@ -67,8 +67,8 @@ def main() -> int:
             step("a file can be created during the session", rc == 0 and out == "live session file", out)
             rc, out = vm.run("cidint config set live/setting 7 && cidint config get live/setting --json")
             step("a configuration value can be set during the session", rc == 0, out)
-            rc, out = vm.run("systemctl is-system-running")
-            step("no failed units in the live session", out in ("running", "starting"), out)
+            ok, out = system_state(vm)
+            step("no failed units in the live session", ok, out)
             rc1, id1 = vm.run("cat /proc/sys/kernel/random/boot_id")
 
             vm.send("sync; systemctl reboot")
