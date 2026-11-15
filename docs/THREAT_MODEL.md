@@ -1,6 +1,6 @@
 # Threat model
 
-Version 0.2.0. This describes the system as it exists, not as planned.
+Version 1.0.0. This describes the system as it exists, not as planned.
 CIDINT OS has not been security-audited. It offers no absolute protection
 and holds no certification.
 

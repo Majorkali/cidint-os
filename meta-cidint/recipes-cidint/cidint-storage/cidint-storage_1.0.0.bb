@@ -7,18 +7,20 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 SRC_URI = "\
     file://cidint-data-setup.service \
     file://home.mount \
+    file://cidint-live-data.service \
 "
 
 S = "${WORKDIR}"
 
 inherit systemd
 
-SYSTEMD_SERVICE:${PN} = "cidint-data-setup.service home.mount"
+SYSTEMD_SERVICE:${PN} = "cidint-data-setup.service home.mount cidint-live-data.service"
 
 do_install() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${WORKDIR}/cidint-data-setup.service ${D}${systemd_system_unitdir}/
     install -m 0644 ${WORKDIR}/home.mount ${D}${systemd_system_unitdir}/
+    install -m 0644 ${WORKDIR}/cidint-live-data.service ${D}${systemd_system_unitdir}/
     # Mount point for the data volume (the wic layout adds the fstab entry).
     install -d ${D}/data
 }

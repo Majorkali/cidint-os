@@ -7,7 +7,7 @@ members = ["services/cidint-core", "cli/cidint"]
 exclude = ["build", "poky"]
 
 [workspace.package]
-version = "0.2.0"
+version = "1.0.0"
 edition = "2021"
 # Yocto 5.0 LTS (scarthgap) ships rustc 1.75; the code must build with it.
 rust-version = "1.75"

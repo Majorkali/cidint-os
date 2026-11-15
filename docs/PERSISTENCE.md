@@ -1,9 +1,9 @@
 # Persistence
 
 Data persistence is a release gate. This document states what is designed,
-what is implemented, and what has been proven. As of 0.2.0 **no reboot test
-has been run on a CIDINT image**; the guarantees below are verified at the
-level of the storage code only.
+what is implemented, and what has been proven. The reboot and
+power-loss tests that have actually been run on a CIDINT image are listed in
+[TESTING.md](TESTING.md); anything not listed there is unproven.
 
 ## Disk layout (x86_64, GPT)
 
@@ -97,7 +97,7 @@ changed, so a pass means a real restart happened in between.
 
 RAID is redundancy against a drive failure. It is not a backup.
 
-## Backup (0.2.0)
+## Backup (1.0.0)
 
 ```bash
 cidint storage backup /data/home --repo /mnt/external/cidint-repo

@@ -1,6 +1,9 @@
 # Status, roadmap and release gates
 
-Release: **0.2.0 "foundation"**, 2026-11-14. Development build.
+Release: **1.0.0**, 2026-11-15. Development build, not production-ready.
+The version number was set by the project owner. It does not mean the
+planned feature set exists: most of the specification is still "Planned"
+below, and no release gate has passed.
 
 Classification used everywhere in this project:
 
@@ -50,7 +53,7 @@ ISOs · architectures other than x86_64 · accessibility and localisation.
 
 iOS and legacy BlackBerry as host platforms.
 
-## Known limitations of 0.2.0
+## Known limitations of 1.0.0
 
 - The CLI acts with the caller's own permissions; there is no broker yet.
 - Backups are not encrypted by CIDINT; keep the repository on an encrypted volume.

@@ -1,0 +1,17 @@
+[Unit]
+Description=CIDINT amnesic live session: /data in RAM
+Documentation=https://github.com/Majorkali/cidint-os/blob/main/docs/PERSISTENCE.md
+DefaultDependencies=no
+# Only in the amnesic live mode. An installed system mounts the data
+# partition from /etc/fstab and never runs this.
+ConditionKernelCommandLine=cidint.mode=amnesic
+ConditionPathIsMountPoint=!/data
+Before=cidint-data-setup.service home.mount local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /data
+
+[Install]
+WantedBy=local-fs.target

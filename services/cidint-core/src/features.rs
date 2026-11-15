@@ -135,7 +135,13 @@ pub const FEATURES: &[Feature] = &[
     ),
     f(
         "build",
-        "Live / installer / server / recovery ISOs",
+        "Live ISO, amnesic mode (console only)",
+        Untested,
+        "image recipe and QEMU test written; results in docs/TESTING.md",
+    ),
+    f(
+        "build",
+        "Persistent live USB, installer, server and recovery ISOs",
         Planned,
         "",
     ),

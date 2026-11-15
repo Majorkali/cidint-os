@@ -46,7 +46,7 @@ disagree.
 0 ok, 1 failure, 2 usage, 3 unsupported here, 4 not implemented,
 5 verification failed, 6 permission denied, 7 refused to protect data.
 
-## Components in 0.2.0
+## Components in 1.0.0
 
 ```
 cli/cidint                 cidint binary (clap)

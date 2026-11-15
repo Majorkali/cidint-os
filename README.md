@@ -3,7 +3,9 @@
 **Cyber Intelligence, Defense, Innovation & Network Technology Operating System**
 *Intelligence Beyond Limits.*
 
-> **Status: 0.2.0 "foundation", development. Not production-ready.**
+> **Status: version 1.0.0. Not production-ready: none of the twelve release
+> gates in [docs/STATUS.md](docs/STATUS.md) has passed.** The version number
+> was set by the project owner; it does not mean the planned feature set exists.
 > What exists today is the persistence and tooling foundation and a
 > console-only x86_64 UEFI disk image that builds in CI and passes a boot,
 > reboot and power-loss test in QEMU. It has **not been run on physical

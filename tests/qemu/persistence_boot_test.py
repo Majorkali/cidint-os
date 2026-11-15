@@ -33,14 +33,18 @@ CMD_TIMEOUT = 120
 
 
 class Vm:
-    def __init__(self, image: Path, code: Path, nvram: Path, log):
+    def __init__(self, image: Path, code: Path, nvram: Path, log, cdrom: bool = False):
         accel = ["-enable-kvm", "-cpu", "host"] if os.access("/dev/kvm", os.W_OK) else ["-cpu", "max"]
+        if cdrom:
+            media = ["-cdrom", str(image)]
+        else:
+            media = ["-drive", f"file={image},format=raw,if=none,id=disk0",
+                     "-device", "ide-hd,drive=disk0,bus=ide.0"]
         cmd = [
             "qemu-system-x86_64", "-machine", "q35", "-m", "2048", "-smp", "2", *accel,
             "-drive", f"if=pflash,format=raw,readonly=on,file={code}",
             "-drive", f"if=pflash,format=raw,file={nvram}",
-            "-drive", f"file={image},format=raw,if=none,id=disk0",
-            "-device", "ide-hd,drive=disk0,bus=ide.0",
+            *media,
             "-display", "none", "-serial", "stdio", "-monitor", "none",
             "-nic", "none",
         ]

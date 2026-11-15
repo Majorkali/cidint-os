@@ -3,6 +3,7 @@ Description=CIDINT data volume layout
 Documentation=https://github.com/Majorkali/cidint-os/blob/main/docs/PERSISTENCE.md
 DefaultDependencies=no
 RequiresMountsFor=/data
+After=cidint-live-data.service
 Before=local-fs.target home.mount
 # Do nothing if the data volume is missing or read-only; home.mount then
 # fails visibly instead of silently writing to a temporary location.

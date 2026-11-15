@@ -10,7 +10,9 @@ header:
 
 machine: genericx86-64
 distro: cidint
-target: cidint-image-base
+target:
+  - cidint-image-base
+  - cidint-image-live
 
 repos:
   # This repository (the directory containing kas/).
@@ -35,5 +37,8 @@ local_conf_header:
     EXTRA_IMAGE_FEATURES += "debug-tweaks"
     # Keep disk usage within a hosted CI runner.
     INHERIT += "rm_work"
+    # Live ISO initramfs: boot scripts only, without the Yocto reference
+    # installer (it formats disks and knows nothing of the CIDINT layout).
+    INITRAMFS_SCRIPTS = "initramfs-framework-base initramfs-module-udev initramfs-live-boot"
     BB_NUMBER_THREADS ?= "${@oe.utils.cpu_count()}"
     PARALLEL_MAKE ?= "-j ${@oe.utils.cpu_count()}"
