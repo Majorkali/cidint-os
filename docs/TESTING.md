@@ -119,12 +119,44 @@ image file name in the collect step (43581678019), and a test-script login
 race (the run for commit `eef3053`: the image booted to a login prompt, the
 first command went unanswered; the script now waits for the shell prompt).
 
+### 2026-11-15, GitHub Actions run 43702270151 (commit `5b75591`)
+
+First run of version 1.0.0 in which every step passed. Build with a warm
+cache: 5 min. Results are read from the per-check reports (run annotations
+and the downloaded `qemu-test-evidence` artifact).
+
+- Disk image, boot/reboot/power cut (`persistence_boot_test.py`): 15/15, KVM used.
+- Live ISO as CD-ROM under UEFI (`live_boot_test.py`): 10/10. Kernel command
+  line carries `cidint.mode=amnesic`; mode `live_amnesic`; `/data` is tmpfs;
+  no failed units; after a real reboot the session file and the
+  configuration value were gone (acceptance test 15).
+- Install to a blank 4.06 GiB virtual disk (`install_test.py`): 11/11. Disk
+  listing; dry run changed nothing; refused without confirmation, with a
+  confirmation naming another disk, with the live medium as target, and on
+  the populated disk without `--erase-existing` (all exit 7); confirmed
+  install produced four partitions; the installed disk, booted without the
+  ISO, passed the same 15 boot/reboot/power-cut checks.
+
+Artifacts: `cidint-os-images` (ISO 177,209,344 bytes, SHA-256
+`dd88acbd...01f4b45b`; compressed disk image `4b640e55...415bd3d1`) and
+`qemu-test-evidence`. Both were downloaded and the image checksums matched
+the build's `SHA256SUMS`.
+
+Failed runs before it, same day: run 43678086155 (`d02ae67`) could not
+assemble the live initramfs (`/init` supplied by two packages; no test ran).
+Run 43694452915 (`66b8ca7`): disk image 15/15, live ISO 10/10, install 9/10;
+the installer stopped at the `dd` step with its error output discarded. The
+command was changed (no `conv=fsync`, errors shown) and the next run passed;
+the exact cause of the `dd` failure was not captured.
+
 Not run so far, and therefore unproven:
 
 - Anything on physical hardware.
 - Booting from the second system slot (`system-b` is empty).
 - A power cut during a write to the backup repository on the image.
-- Repeated runs: the QEMU test has passed once.
+- Repeated runs: the install test has passed once, the live ISO test twice.
+- The live ISO from USB or under legacy BIOS; the installer on real disks,
+  on NVMe names, with `--erase-existing`, or with the typed confirmation.
 - The contents of the SPDX archive.
 
 ## Running the tests

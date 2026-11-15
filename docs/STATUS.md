@@ -28,16 +28,25 @@ The authoritative list is `services/cidint-core/src/features.rs`
 - Reboot-survival marker, file and configuration survival across a real reboot
 - Committed state and audit chain intact after a simulated power cut
 - Hardware inventory on a live Linux system (GitHub runner)
+- Live ISO in amnesic mode: boots under UEFI in QEMU, `/data` in RAM, session
+  file and configuration gone after a restart
+- Console installer `cidint-install`: refuses unconfirmed, mismatched,
+  live-medium and already-populated targets; installs to a blank virtual
+  disk; the installed system passes the reboot and power-loss tests
 
 Tested on: Windows 11 x86_64 development host (Rust 1.100.0 and 1.75.0),
 GitHub `ubuntu-22.04` runners, and the image in QEMU (q35, OVMF). The image
-tests have passed once (run 43603109904). Nothing has run on physical hardware.
+disk-image test has passed three times; the live ISO test twice and the
+install test once (run 43702270151). Nothing has run on physical hardware.
 
 ## Implemented but not fully tested
 
 - Second system slot `system-b`: present in the layout, empty, never booted
 - SPDX SBOM generation (enabled in the build; archive contents not checked)
-- The image on physical hardware (never tried)
+- The image, the live ISO and the installer on physical hardware (never tried)
+- Live ISO from a USB stick and under legacy BIOS (only CD-ROM under UEFI tried)
+- Installer on a disk that already holds data with `--erase-existing`, on
+  NVMe device names, and its interactive typed confirmation (not exercised)
 
 ## Planned (nothing exists yet)
 
@@ -46,8 +55,8 @@ keys · privilege broker · SELinux enforcing · Secure/measured boot · securit
 domains (KVM) and transfer broker · privacy modes and kill switch · NOVA
 desktop, themes and widgets · CNIE AI engine · CASME automation · CUAEE
 application engine · identity (MFA, LDAP, Kerberos) · server edition
-(databases, containers, HA) · live, installer, server, recovery and minimal
-ISOs · architectures other than x86_64 · accessibility and localisation.
+(databases, containers, HA) · persistent live USB, graphical installer,
+server, recovery and minimal ISOs · architectures other than x86_64 · accessibility and localisation.
 
 ## Unsupported
 
@@ -76,7 +85,8 @@ iOS and legacy BlackBerry as host platforms.
 | 0 | Architecture, repository, threat model, build system, CI | done |
 | 1 | Bootable x86_64 UEFI image | builds and boots in QEMU; physical hardware untested |
 | 2 | Persistent data foundation | reboot and power-loss tests pass in QEMU; encryption, updates and filesystem checks missing |
-| 3-13 | Desktop, security, automation, domains, widgets, apps, AI, server, installer/ISO, qualification | planned |
+| 12 (part) | Live ISO and console installer | amnesic live ISO and `cidint-install` pass in QEMU; graphical installer, persistent USB, other editions planned |
+| 3-13 | Desktop, security, automation, domains, widgets, apps, AI, server, qualification | planned |
 
 ## Mandatory persistence acceptance tests (section 3.11)
 
@@ -96,7 +106,7 @@ iOS and legacy BlackBerry as host platforms.
 | 12 | Filesystem integrity check | not yet automated |
 | 13 | Encrypted storage unlock and recovery | blocked: no encryption |
 | 14 | Persistent USB mode across reboots | blocked: no live edition |
-| 15 | Amnesic mode does not persist | detection logic tested; blocked: no live edition |
+| 15 | Amnesic mode does not persist | **passed** in QEMU for a file and a configuration value (run 43702270151) |
 
 ## Production release gates (section 39)
 

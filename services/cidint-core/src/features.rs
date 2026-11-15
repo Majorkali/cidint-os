@@ -136,14 +136,14 @@ pub const FEATURES: &[Feature] = &[
     f(
         "build",
         "Live ISO, amnesic mode (console only)",
-        Untested,
-        "image recipe and QEMU test written; results in docs/TESTING.md",
+        Tested,
+        "boots as CD-ROM under UEFI in QEMU; nothing kept after restart; USB and BIOS untried",
     ),
     f(
         "build",
         "Console installer (cidint-install) with the CIDINT disk layout",
-        Untested,
-        "script and QEMU install test written; results in docs/TESTING.md",
+        Tested,
+        "blank virtual disk in QEMU only; real disks and --erase-existing untried",
     ),
     f(
         "build",

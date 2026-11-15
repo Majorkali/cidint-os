@@ -7,9 +7,10 @@
 > gates in [docs/STATUS.md](docs/STATUS.md) has passed.** The version number
 > was set by the project owner; it does not mean the planned feature set exists.
 > What exists today is the persistence and tooling foundation and a
-> console-only x86_64 UEFI disk image that builds in CI and passes a boot,
-> reboot and power-loss test in QEMU. It has **not been run on physical
-> hardware**. There is no desktop, no installer and no ISO in this release. The exact state of every feature is in [docs/STATUS.md](docs/STATUS.md);
+> console-only x86_64 UEFI disk image, a console-only amnesic live ISO and a
+> console installer. All three build in CI and pass their boot, reboot,
+> power-loss and install tests in QEMU. Nothing has **been run on physical
+> hardware**. There is no desktop in this release. The exact state of every feature is in [docs/STATUS.md](docs/STATUS.md);
 > the same list is printed by `cidint features`.
 
 ## What CIDINT OS is
