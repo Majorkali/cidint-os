@@ -205,7 +205,10 @@ mkfs.vfat -F 32 -n ESP "${P}1" >/dev/null
 mkfs.ext4 -q -F -L cidint-data "${P}4"
 
 say "writing the system image to ${P}2"
-dd if="$SRC/rootfs.img" of="${P}2" bs=4M conv=fsync 2>/dev/null
+# Plain dd plus sync: busybox dd does not always support conv=fsync.
+# Errors are shown, not hidden.
+dd if="$SRC/rootfs.img" of="${P}2" bs=1M || fail "writing the system image failed"
+sync
 e2fsck -fy "${P}2" >/dev/null 2>&1 || [ $? -le 1 ] || fail "system image failed its filesystem check after writing"
 resize2fs "${P}2" >/dev/null 2>&1 || fail "could not grow the system filesystem"
 
