@@ -90,7 +90,10 @@ case "${1:-}" in
         [ -n "$MODEL" ] && [ -f "$MODEL" ] || { echo "$PROG: no model installed in $MODELS" >&2; exit 3; }
         set -- "$ENGINE" -m "$MODEL" -no-cnv --no-display-prompt --simple-io -n "$TOKENS" -p "$1"
         [ -z "$SEED" ] || set -- "$@" -s "$SEED"
-        sandbox "$@" 2>/dev/null
+        # Strip terminal colour codes: the answer is plain text.
+        OUT=$(sandbox "$@" 2>/dev/null) || fail "the engine ended with an error"
+        ESC=$(printf '\033')
+        printf '%s\n' "$OUT" | sed "s/${ESC}\[[0-9;]*m//g"
         ;;
     sandbox-check)
         need_root

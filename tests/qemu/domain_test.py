@@ -98,10 +98,12 @@ def main() -> int:
             personal = wait_ready(vm, "personal")
             step("domain 'personal' reports ready", "CIDINT domain 'personal' ready" in personal, personal)
 
-            step("isolation: a domain has no network interface except loopback",
-                 field(work, "domain-interfaces").split() == ["lo"]
-                 and field(personal, "domain-interfaces").split() == ["lo"],
-                 field(work, "domain-interfaces") + " / " + field(personal, "domain-interfaces"))
+            # The domain's kernel creates software-only interfaces (lo, sit0);
+            # what matters is that no network card is attached.
+            step("isolation: a domain has no network card",
+                 field(work, "domain-network-cards") == "0" and field(personal, "domain-network-cards") == "0",
+                 "cards: " + field(work, "domain-network-cards") + " / " + field(personal, "domain-network-cards")
+                 + "; interfaces: " + field(work, "domain-interfaces"))
             step("isolation: a domain has no disk", field(work, "domain-disks") == "" and
                  field(personal, "domain-disks") == "", field(work, "domain-disks"))
             mem = field(personal, "domain-memory-kb")

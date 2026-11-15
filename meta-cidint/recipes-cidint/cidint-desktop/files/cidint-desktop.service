@@ -18,7 +18,7 @@ Environment=LIBSEAT_BACKEND=seatd
 Environment=HOME=/home/cidint
 # /home lives on the data volume; create this user's directory there once.
 ExecStartPre=+/bin/sh -c 'mkdir -p /home/cidint && chown cidint:cidint /home/cidint && chmod 700 /home/cidint'
-ExecStart=/usr/bin/weston --config=/etc/cidint/weston.ini --log=/run/cidint-session/weston.log
+ExecStart=/usr/bin/weston --config=/etc/cidint/weston.ini
 Restart=on-failure
 RestartSec=3
 

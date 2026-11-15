@@ -12,6 +12,7 @@ hostname "${NAME:-domain}"
 
 echo "CIDINT domain '$NAME' starting (kernel $(uname -r))"
 echo "domain-interfaces: $(ls /sys/class/net | tr '\n' ' ')"
+echo "domain-network-cards: $(ls -d /sys/class/net/*/device 2>/dev/null | wc -l)"
 echo "domain-disks: $(ls /sys/block | grep -v -E '^(ram|loop)' | tr '\n' ' ')"
 echo "domain-memory-kb: $(sed -n 's/^MemTotal: *\([0-9]*\).*/\1/p' /proc/meminfo)"
 echo "CIDINT domain '$NAME' ready"

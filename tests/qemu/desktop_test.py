@@ -130,8 +130,9 @@ def main() -> int:
         return hit / total if total else 0.0
 
     def diagnostics(vm) -> str:
-        rc, out = vm.run("systemctl status cidint-desktop.service seatd.service --no-pager -n 6 2>&1 | tail -n 30; "
-                         "cat /run/cidint-session/weston.log 2>/dev/null | tail -n 25; ls /dev/dri 2>&1; "
+        rc, out = vm.run("journalctl -b -u cidint-desktop.service --no-pager -o cat | grep -v '^$' | tail -n 30; "
+                         "journalctl -b -u seatd.service --no-pager -o cat | tail -n 6; ls /dev/dri 2>&1; "
+                         "id cidint; "
                          "dmesg | grep -i -E 'drm|bochs|virtio_gpu|simple-framebuffer' | tail -n 8")
         return out
 

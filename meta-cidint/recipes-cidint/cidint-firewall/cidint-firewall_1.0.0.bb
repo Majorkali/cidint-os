@@ -19,7 +19,13 @@ do_install() {
     install -d ${D}${sysconfdir}/cidint/firewall.d ${D}${systemd_system_unitdir}
     install -m 0644 ${WORKDIR}/firewall.nft ${D}${sysconfdir}/cidint/firewall.nft
     install -m 0644 ${WORKDIR}/cidint-firewall.service ${D}${systemd_system_unitdir}/
+    # New network namespaces (sandboxes) get loopback only, no automatic
+    # fallback tunnel devices such as sit0.
+    install -d ${D}${nonarch_libdir}/sysctl.d
+    echo 'net.core.fb_tunnels_only_for_init_net = 1' > ${D}${nonarch_libdir}/sysctl.d/60-cidint-network.conf
 }
+
+FILES:${PN} += "${nonarch_libdir}/sysctl.d"
 
 RDEPENDS:${PN} = "nftables"
 
