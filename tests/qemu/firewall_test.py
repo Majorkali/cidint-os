@@ -111,7 +111,7 @@ def main() -> int:
             step("the interface has the address 10.0.2.15", "10.0.2.15" in out, out)
 
             threading.Thread(target=serve, daemon=True).start()
-            rc, out = vm.run(f"echo hello-from-guest | nc -w 10 10.0.2.2 {host_port}", timeout=60)
+            rc, out = vm.run(f"echo hello-from-guest | nc 10.0.2.2 {host_port}", timeout=60)
             step("outbound: guest connects to the test host and gets the reply",
                  "pong-from-host" in out and received.get("data", b"").startswith(b"hello-from-guest"),
                  f"guest saw {out!r}; host saw {received!r}")

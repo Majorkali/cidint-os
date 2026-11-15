@@ -188,6 +188,7 @@ if [ "$ENCRYPT" -eq 1 ]; then
     [ -z "$PASS_FILE" ] || [ -r "$PASS_FILE" ] || fail "cannot read $PASS_FILE"
 fi
 [ -z "$ROOTPW_FILE" ] || [ -r "$ROOTPW_FILE" ] || fail "cannot read $ROOTPW_FILE"
+command -v openssl >/dev/null 2>&1 || fail "openssl is not available to hash the root password"
 
 echo
 echo "Installation plan"
@@ -209,7 +210,9 @@ if [ "$DRY" -eq 1 ]; then
     exit 0
 fi
 
+INTERACTIVE=0
 if [ "$CONFIRM" != "$TARGET" ]; then
+    INTERACTIVE=1
     [ -z "$CONFIRM" ] || refuse "--confirm-erase '$CONFIRM' does not match the target '$TARGET'"
     [ -t 0 ] || refuse "no confirmation given; repeat with --confirm-erase $TARGET"
     printf 'Everything on %s will be erased. Type the device path to continue: ' "$TARGET"
@@ -217,12 +220,13 @@ if [ "$CONFIRM" != "$TARGET" ]; then
     [ "$answer" = "$TARGET" ] || refuse "confirmation did not match; nothing was changed"
 fi
 
+# With --confirm-erase the run is unattended: nothing below asks a question.
 PASSPHRASE=""
 if [ "$ENCRYPT" -eq 1 ]; then
     if [ -n "$PASS_FILE" ]; then
         PASSPHRASE=$(first_line "$PASS_FILE")
     else
-        [ -t 0 ] || refuse "no passphrase given; use --passphrase-file FILE"
+        [ "$INTERACTIVE" -eq 1 ] || refuse "no passphrase given; use --passphrase-file FILE"
         echo "Choose the passphrase for the data volume. If it is lost, the data cannot be recovered."
         ask_secret "Data volume passphrase"; PASSPHRASE=$SECRET
     fi
@@ -232,7 +236,7 @@ ROOTPW=""
 if [ -n "$ROOTPW_FILE" ]; then
     ROOTPW=$(first_line "$ROOTPW_FILE")
     [ -n "$ROOTPW" ] || refuse "$ROOTPW_FILE is empty; nothing was changed"
-elif [ -t 0 ]; then
+elif [ "$INTERACTIVE" -eq 1 ]; then
     echo "Set the root password of the installed system (empty: keep the development default, no password)."
     ask_secret "Root password"; ROOTPW=$SECRET
 fi
@@ -320,10 +324,13 @@ $DATA_SPEC	/data	ext4	defaults	0	2
 EOF
 if [ -n "$ROOTPW" ]; then
     say "setting the root password"
-    printf 'root:%s
-' "$ROOTPW" | chpasswd -R "$WORK/root" -c SHA512 2>/dev/null         || printf 'root:%s
-' "$ROOTPW" | chpasswd -R "$WORK/root"         || fail "could not set the root password"
-    grep -q '^root:\$' "$WORK/root/etc/shadow" || fail "the root password was not stored as a hash"
+    HASH=$(printf '%s' "$ROOTPW" | openssl passwd -6 -stdin) || fail "could not hash the root password"
+    case "$HASH" in '$6$'*) ;; *) fail "unexpected password hash format" ;; esac
+    awk -F: -v OFS=: -v h="$HASH" '$1 == "root" { $2 = h } { print }' "$WORK/root/etc/shadow" > "$WORK/shadow.new" \
+        || fail "could not prepare the password file"
+    cat "$WORK/shadow.new" > "$WORK/root/etc/shadow"
+    rm -f "$WORK/shadow.new"
+    grep -q '^root:\$6\$' "$WORK/root/etc/shadow" || fail "the root password was not stored as a hash"
 fi
 sync
 umount "$WORK/root"

@@ -26,5 +26,5 @@ RDEPENDS:${PN} = "\
     e2fsprogs-resize2fs \
     udev \
     cryptsetup \
-    shadow \
+    openssl-bin \
 "

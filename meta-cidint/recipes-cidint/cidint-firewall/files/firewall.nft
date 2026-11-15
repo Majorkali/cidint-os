@@ -21,7 +21,7 @@ table inet cidint_filter {
         udp sport 67 udp dport 68 accept
         ip6 saddr fe80::/10 udp dport 546 accept
 
-        counter comment "cidint-default-deny" drop
+        counter drop comment "cidint-default-deny"
     }
 
     chain forward {
