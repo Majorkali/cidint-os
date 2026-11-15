@@ -179,6 +179,13 @@ jobs:
             artifacts/image/cidint-os-${CIDINT_VERSION}-server-x86_64.wic \
             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: A/B update, trial start, commit and rollback (QEMU, UEFI)
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        run: |
+          scripts/ci-run.sh "QEMU update test" python3 tests/qemu/update_test.py \
+            artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso \
+            --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
       - name: Test summary
         if: always()
         run: |

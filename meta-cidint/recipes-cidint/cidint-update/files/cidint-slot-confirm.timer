@@ -1,0 +1,9 @@
+[Unit]
+Description=CIDINT update: check a trial system slot shortly after start
+ConditionKernelCommandLine=cidint.slot
+
+[Timer]
+OnBootSec=20s
+
+[Install]
+WantedBy=timers.target

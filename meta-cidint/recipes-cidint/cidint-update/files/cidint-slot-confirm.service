@@ -1,0 +1,10 @@
+[Unit]
+Description=CIDINT update: commit the trial system slot once the system is healthy
+ConditionKernelCommandLine=cidint.slot
+RequiresMountsFor=/boot /data
+
+[Service]
+# Not "oneshot": a waiting start job would keep the system in the
+# "starting" state that this very check waits to leave.
+Type=exec
+ExecStart=/usr/sbin/cidint-slot confirm --when-healthy

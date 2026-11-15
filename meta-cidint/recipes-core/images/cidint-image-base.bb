@@ -13,6 +13,7 @@ IMAGE_INSTALL = "\
     cidint-cli \
     cidint-storage \
     cidint-firewall \
+    cidint-update \
     cryptsetup \
     ${CORE_IMAGE_EXTRA_INSTALL} \
 "

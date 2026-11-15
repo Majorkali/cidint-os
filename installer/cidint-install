@@ -339,15 +339,45 @@ say "installing the boot loader"
 mount "${P}1" "$WORK/esp"
 mkdir -p "$WORK/esp/EFI/BOOT"
 cp "$SRC/EFI/BOOT/bootx64.efi" "$WORK/esp/EFI/BOOT/bootx64.efi"
-cp "$SRC/bzImage" "$WORK/esp/bzImage"
+# One kernel per system slot: an update brings its own kernel.
+cp "$SRC/bzImage" "$WORK/esp/bzImage-a"
+UUID_B=$(blkid -o value -s PARTUUID "${P}3")
+[ -n "$UUID_B" ] || fail "could not read the identifier of the second system slot"
 CONSOLES=$(tr ' ' '\n' < /proc/cmdline | grep '^console=' | tr '\n' ' ' || true)
+ARGS="rootwait rootfstype=ext4 ro cidint.mode=installed $CONSOLES $KARGS"
+# Boot state for A/B updates (read and written by cidint-slot):
+#   slot   the committed slot
+#   trial  a newly written slot that is to be tried once
+#   tried  set by the boot loader when the trial slot has been started
+# A trial slot that was started but never confirmed is abandoned on the
+# next start and the committed slot is used again.
+grub-editenv "$WORK/esp/EFI/BOOT/grubenv" create || fail "could not create the boot state file"
+grub-editenv "$WORK/esp/EFI/BOOT/grubenv" set slot=a || fail "could not write the boot state file"
 cat > "$WORK/esp/EFI/BOOT/grub.cfg" <<EOF
 serial --unit=0 --speed=115200 --word=8 --parity=no --stop=1
-default=boot
-timeout=3
+set slot=a
+load_env
+set boot_slot="\$slot"
+if [ -n "\$trial" ]; then
+    if [ "\$tried" = "1" ]; then
+        set trial=
+        set tried=
+        set rolled_back=1
+        save_env trial tried rolled_back
+    else
+        set tried=1
+        save_env tried
+        set boot_slot="\$trial"
+    fi
+fi
+set default="\$boot_slot"
+set timeout=3
 
-menuentry 'CIDINT OS' --id boot {
-    linux /bzImage root=PARTUUID=$UUID_A rootwait rootfstype=ext4 ro cidint.mode=installed $CONSOLES $KARGS
+menuentry 'CIDINT OS (system slot A)' --id a {
+    linux /bzImage-a root=PARTUUID=$UUID_A $ARGS cidint.slot=a
+}
+menuentry 'CIDINT OS (system slot B)' --id b {
+    linux /bzImage-b root=PARTUUID=$UUID_B $ARGS cidint.slot=b
 }
 EOF
 sync

@@ -1,0 +1,174 @@
+#!/bin/sh
+# cidint-slot - A/B system updates for an installed CIDINT OS.
+#
+# The disk has two system slots (partitions 2 and 3). One is running; an
+# update is written to the other one, started once as a trial, and only
+# becomes the committed system after it has come up healthy. If the trial
+# does not get that far, the next start uses the committed slot again.
+# The data volume is never touched by an update.
+#
+#   cidint-slot status                 show the slots and any pending trial
+#   cidint-slot install DIR            write the update in DIR to the spare slot
+#   cidint-slot confirm [--when-healthy]   commit the running trial slot
+#   cidint-slot cancel                 drop a trial that has not been started
+#
+# An update directory holds rootfs.img, bzImage and update.sha256 (output
+# of "sha256sum rootfs.img bzImage"). The checksums detect damage; they do
+# NOT prove who made the update. Signature checking is not implemented.
+#
+# Exit codes: 0 ok, 1 failure, 2 usage, 3 not an installed A/B system,
+#             5 verification failed, 6 not root, 7 refused.
+set -eu
+
+PROG=cidint-slot
+ENVFILE=/boot/EFI/BOOT/grubenv
+HOLD=/data/config/cidint/hold-update-confirm
+WORK=/run/cidint-slot
+SLOT_BYTES=1073741824
+
+say()    { echo "$PROG: $*"; }
+fail()   { echo "$PROG: error: $*" >&2; exit 1; }
+refuse() { echo "$PROG: refused: $*" >&2; exit 7; }
+
+arg() { tr ' ' '\n' < /proc/cmdline | sed -n "s/^$1=//p" | tail -n 1; }
+
+CUR=$(arg cidint.slot)
+case "$CUR" in
+    a|b) ;;
+    *) echo "$PROG: this system was not started from an A/B system slot" >&2; exit 3 ;;
+esac
+[ -f "$ENVFILE" ] || { echo "$PROG: boot state file $ENVFILE not found (is /boot mounted?)" >&2; exit 3; }
+
+getenv() { grub-editenv "$ENVFILE" list | sed -n "s/^$1=//p" | tail -n 1; }
+
+other() { [ "$1" = a ] && echo b || echo a; }
+
+# Partition of a slot, derived from the partition this system runs from.
+slot_dev() {
+    root=$(arg root)
+    case "$root" in
+        PARTUUID=*) dev=$(readlink -f "/dev/disk/by-partuuid/${root#PARTUUID=}") ;;
+        *) fail "unexpected root= argument: $root" ;;
+    esac
+    [ -b "$dev" ] || fail "cannot resolve the running system partition"
+    base=${dev%[23]}
+    [ "$base" != "$dev" ] || fail "the running system is not on partition 2 or 3: $dev"
+    [ "$1" = a ] && echo "${base}2" || echo "${base}3"
+}
+
+cmd_status() {
+    echo "running slot   : $CUR ($(slot_dev "$CUR"))"
+    echo "committed slot : $(getenv slot)"
+    echo "trial slot     : $(getenv trial)"
+    echo "trial started  : $([ "$(getenv tried)" = 1 ] && echo yes || echo no)"
+    echo "rolled back    : $([ "$(getenv rolled_back)" = 1 ] && echo yes || echo no)"
+    [ ! -e "$HOLD" ] || echo "automatic confirmation is on hold ($HOLD exists)"
+}
+
+need_root() { [ "$(id -u)" -eq 0 ] || { echo "$PROG: must be run as root" >&2; exit 6; }; }
+
+cmd_install() {
+    need_root
+    DIR=${1:-}
+    [ -n "$DIR" ] && [ -d "$DIR" ] || { echo "Usage: $PROG install DIR" >&2; exit 2; }
+    for f in rootfs.img bzImage update.sha256; do
+        [ -f "$DIR/$f" ] || { echo "$PROG: verification failed: $DIR lacks $f" >&2; exit 5; }
+    done
+    [ "$(getenv slot)" = "$CUR" ] || refuse "the running slot ($CUR) is not the committed one; confirm or restart first"
+    [ -z "$(getenv trial)" ] || refuse "a trial of slot $(getenv trial) is already pending; restart, or run '$PROG cancel'"
+
+    # Both files must be listed, and both must match.
+    for f in rootfs.img bzImage; do
+        grep -q "  $f\$" "$DIR/update.sha256" || { echo "$PROG: verification failed: update.sha256 does not list $f" >&2; exit 5; }
+    done
+    ( cd "$DIR" && sha256sum -c update.sha256 >/dev/null 2>&1 ) \
+        || { echo "$PROG: verification failed: checksum mismatch; nothing was written" >&2; exit 5; }
+    [ "$(stat -c %s "$DIR/rootfs.img")" -le "$SLOT_BYTES" ] || refuse "the system image does not fit a 1024 MiB slot"
+
+    NEW=$(other "$CUR")
+    DEV=$(slot_dev "$NEW")
+    RUN=$(slot_dev "$CUR")
+    [ -b "$DEV" ] || fail "spare slot device $DEV not found"
+    [ "$DEV" != "$RUN" ] || fail "internal error: spare slot equals the running slot"
+    ! grep -q "^$DEV " /proc/mounts || refuse "$DEV is mounted"
+
+    say "writing the update to slot $NEW ($DEV); the running slot $CUR is not touched"
+    dd if="$DIR/rootfs.img" of="$DEV" bs=1M || fail "writing the system image failed"
+    sync
+    e2fsck -fy "$DEV" >/dev/null 2>&1 || [ $? -le 1 ] || fail "the written image failed its filesystem check"
+    resize2fs "$DEV" >/dev/null 2>&1 || fail "could not grow the filesystem"
+
+    # Carry this machine's settings over to the new system: mounts,
+    # the encrypted-volume table and the root password.
+    mkdir -p "$WORK/new"
+    mount "$DEV" "$WORK/new"
+    trap 'umount "$WORK/new" 2>/dev/null || true' EXIT
+    awk '$2 == "/boot" || $2 == "/data"' /etc/fstab >> "$WORK/new/etc/fstab"
+    if [ -f /etc/crypttab ]; then
+        cat /etc/crypttab > "$WORK/new/etc/crypttab"
+        chmod 600 "$WORK/new/etc/crypttab"
+    fi
+    HASH=$(awk -F: '$1 == "root" { print $2 }' /etc/shadow)
+    awk -F: -v OFS=: -v h="$HASH" '$1 == "root" { $2 = h } { print }' "$WORK/new/etc/shadow" > "$WORK/shadow.new"
+    cat "$WORK/shadow.new" > "$WORK/new/etc/shadow"
+    rm -f "$WORK/shadow.new"
+    sync
+    umount "$WORK/new"
+    trap - EXIT
+    e2fsck -fn "$DEV" >/dev/null 2>&1 || fail "slot $NEW failed its final filesystem check"
+
+    cp "$DIR/bzImage" "/boot/bzImage-$NEW.new" || fail "could not copy the kernel"
+    sync
+    mv "/boot/bzImage-$NEW.new" "/boot/bzImage-$NEW"
+    sync
+
+    grub-editenv "$ENVFILE" unset tried rolled_back
+    grub-editenv "$ENVFILE" set trial="$NEW"
+    sync
+    say "slot $NEW is ready. Restart to try it; it is committed once it has come up healthy."
+}
+
+cmd_confirm() {
+    need_root
+    TRIAL=$(getenv trial)
+    if [ "$TRIAL" != "$CUR" ]; then
+        [ "${1:-}" = "--when-healthy" ] && exit 0
+        refuse "no trial of the running slot ($CUR) is pending"
+    fi
+    if [ "${1:-}" = "--when-healthy" ]; then
+        if [ -e "$HOLD" ]; then
+            say "confirmation is on hold ($HOLD exists)"
+            exit 0
+        fi
+        # Wait until start-up has finished, then require a clean result.
+        n=0
+        while [ "$(systemctl is-system-running 2>/dev/null || true)" = "starting" ] && [ $n -lt 60 ]; do
+            sleep 5
+            n=$((n + 1))
+        done
+        STATE=$(systemctl is-system-running 2>/dev/null || true)
+        [ "$STATE" = "running" ] || fail "system state is '$STATE'; slot $CUR is NOT confirmed and will be abandoned at the next start"
+    fi
+    grub-editenv "$ENVFILE" set slot="$CUR"
+    grub-editenv "$ENVFILE" unset trial tried
+    sync
+    say "slot $CUR is now the committed system"
+}
+
+cmd_cancel() {
+    need_root
+    TRIAL=$(getenv trial)
+    [ -n "$TRIAL" ] || refuse "no trial is pending"
+    [ "$TRIAL" != "$CUR" ] || refuse "the trial slot is running; restart without confirming to go back"
+    grub-editenv "$ENVFILE" unset trial tried
+    sync
+    say "the pending trial of slot $TRIAL was dropped; slot $(getenv slot) stays committed"
+}
+
+case "${1:-}" in
+    status)  cmd_status ;;
+    install) shift; cmd_install "$@" ;;
+    confirm) shift; cmd_confirm "$@" ;;
+    cancel)  cmd_cancel ;;
+    *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+esac

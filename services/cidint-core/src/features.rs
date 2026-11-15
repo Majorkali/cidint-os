@@ -81,9 +81,15 @@ pub const FEATURES: &[Feature] = &[
     ),
     f(
         "persistence",
-        "A/B system updates with rollback",
+        "A/B system updates with rollback (cidint-slot, local update directory)",
+        Untested,
+        "tool and QEMU test written; checksum only, no signature verification",
+    ),
+    f(
+        "persistence",
+        "Signed updates, update server, version checks",
         Planned,
-        "two root slots are reserved in the disk layout",
+        "",
     ),
     f(
         "persistence",
