@@ -12,6 +12,8 @@ IMAGE_INSTALL = "\
     e2fsprogs-e2fsck \
     cidint-cli \
     cidint-storage \
+    cidint-firewall \
+    cryptsetup \
     ${CORE_IMAGE_EXTRA_INSTALL} \
 "
 

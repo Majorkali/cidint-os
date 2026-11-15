@@ -148,11 +148,23 @@ jobs:
       - name: Install to a blank disk, then persistence test (QEMU, UEFI)
         run: |
           scripts/ci-run.sh "QEMU install test" python3 tests/qemu/install_test.py             artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: Encrypted install, unlock at boot, persistence test (QEMU, UEFI)
+        run: |
+          scripts/ci-run.sh "QEMU encrypted install test" python3 tests/qemu/install_test.py \
+            artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso \
+            --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd \
+            --encrypt --workdir artifacts/qemu-test/encrypted
+      - name: Firewall test with real traffic (QEMU, UEFI)
+        run: |
+          scripts/ci-run.sh "QEMU firewall test" python3 tests/qemu/firewall_test.py \
+            artifacts/image/cidint-os-${CIDINT_VERSION}-x86_64.wic \
+            --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
       - name: Test summary
         if: always()
         run: |
-          for r in artifacts/qemu-test/persistence-report.json artifacts/qemu-test/live-report.json artifacts/qemu-test/install-report.json artifacts/qemu-test/installed/persistence-report.json; do
-            [ -f "$r" ] || continue
+          for r in $(find artifacts/qemu-test -name '*report.json' 2>/dev/null | sort); do
             echo "::notice title=$r::$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print('kvm=%s; ' % d.get('kvm') + '; '.join(('PASS ' if x['passed'] else 'FAIL ') + x['test'] for x in d['results']))" "$r" | cut -c1-3000)"
           done
       - name: Upload test evidence
@@ -161,14 +173,8 @@ jobs:
         with:
           name: qemu-test-evidence
           path: |
-            artifacts/qemu-test/serial.log
-            artifacts/qemu-test/persistence-report.json
-            artifacts/qemu-test/live-serial.log
-            artifacts/qemu-test/live-report.json
-            artifacts/qemu-test/install-serial.log
-            artifacts/qemu-test/install-report.json
-            artifacts/qemu-test/installed/serial.log
-            artifacts/qemu-test/installed/persistence-report.json
+            artifacts/qemu-test/**/*serial.log
+            artifacts/qemu-test/**/*report.json
       - name: Compress disk image and write checksums
         run: |
           set -euo pipefail

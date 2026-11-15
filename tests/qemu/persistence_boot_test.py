@@ -34,7 +34,11 @@ CMD_TIMEOUT = 120
 
 class Vm:
     def __init__(self, image: Path, code: Path, nvram: Path, log, cdrom: bool = False,
-                 extra_disk: Path | None = None):
+                 extra_disk: Path | None = None, passphrase: str | None = None,
+                 root_password: str = "", nic: list[str] | None = None):
+        self.passphrase = passphrase
+        self.root_password = root_password
+        self.unlock_prompts = 0
         accel = ["-enable-kvm", "-cpu", "host"] if os.access("/dev/kvm", os.W_OK) else ["-cpu", "max"]
         if cdrom:
             media = ["-cdrom", str(image)]
@@ -50,7 +54,7 @@ class Vm:
             "-drive", f"if=pflash,format=raw,file={nvram}",
             *media,
             "-display", "none", "-serial", "stdio", "-monitor", "none",
-            "-nic", "none",
+            *(nic or ["-nic", "none"]),
         ]
         self.log = log
         self.buf = ""
@@ -89,14 +93,28 @@ class Vm:
         self.proc.stdin.flush()
 
     def login(self):
-        self.expect(r"login: ", LOGIN_TIMEOUT)
+        while True:
+            m = self.expect(r"(login: |Please enter passphrase for disk)", LOGIN_TIMEOUT)
+            if m.group(1).startswith("login"):
+                break
+            # Encrypted data volume: systemd asks on the console before the
+            # system can finish starting.
+            if self.passphrase is None:
+                raise RuntimeError("the system asked for a disk passphrase; none was expected")
+            self.unlock_prompts += 1
+            if self.unlock_prompts > 6:
+                raise RuntimeError("the disk passphrase was asked for more than 6 times")
+            time.sleep(2)
+            self.send(self.passphrase)
         time.sleep(1)
         self.send("root")
         # Wait for the shell (or a password prompt: the development image
         # has an empty root password) instead of guessing with a sleep.
         m = self.expect(r"(Password: |[#$] )", 120)
+        if self.root_password and not m.group(1).startswith("Password"):
+            raise RuntimeError("root was logged in without the password that was set")
         if m.group(1).startswith("Password"):
-            self.send("")
+            self.send(self.root_password)
             self.expect(r"[#$] ", 120)
         self.send("stty -echo; export PS1=''")
         last = None
@@ -130,7 +148,10 @@ def main() -> int:
     ap.add_argument("--ovmf-code", type=Path, required=True)
     ap.add_argument("--ovmf-vars", type=Path, required=True)
     ap.add_argument("--workdir", type=Path, default=Path("artifacts/qemu-test"))
+    ap.add_argument("--passphrase", help="data volume passphrase; also turns on the encryption checks")
+    ap.add_argument("--root-password", default="", help="root password set at installation")
     args = ap.parse_args()
+    vmopts = {"passphrase": args.passphrase, "root_password": args.root_password}
 
     args.workdir.mkdir(parents=True, exist_ok=True)
     disk = args.workdir / "disk.wic"
@@ -150,9 +171,20 @@ def main() -> int:
         vm = None
         try:
             # ---- boot 1 -------------------------------------------------
-            vm = Vm(disk, args.ovmf_code, nvram, log)
+            vm = Vm(disk, args.ovmf_code, nvram, log, **vmopts)
             vm.login()
             step("boot: image reaches a login prompt under UEFI", True)
+            if args.passphrase is not None:
+                step("encryption: the passphrase was asked for at boot", vm.unlock_prompts >= 1)
+                rc, out = vm.run("cryptsetup status cidint-data")
+                step("encryption: /dev/mapper/cidint-data is an active LUKS2 volume",
+                     rc == 0 and "LUKS2" in out and "is active" in out, out)
+                rc, out = vm.run("grep ' /data ' /proc/mounts")
+                step("encryption: /data is mounted from the unlocked volume",
+                     rc == 0 and out.startswith("/dev/mapper/cidint-data "), out)
+            if args.root_password:
+                rc, out = vm.run("cut -d: -f2 /etc/shadow | head -n 1 | cut -c1-3")
+                step("root password: stored as a hash, and login required it", rc == 0 and out == "$6$", out)
 
             rc, out = vm.run("cidint persistence status --json")
             report = json.loads(out)["data"] if out.startswith("{") else {}
@@ -190,7 +222,7 @@ def main() -> int:
             vm.kill()
 
             # ---- boot 3 (after simulated power loss) --------------------
-            vm = Vm(disk, args.ovmf_code, nvram, log)
+            vm = Vm(disk, args.ovmf_code, nvram, log, **vmopts)
             vm.login()
             rc, out = vm.run("cidint config get acceptance/before-power-cut --json")
             step("power loss: value committed before the cut is present",
@@ -210,6 +242,26 @@ def main() -> int:
         finally:
             if vm and vm.proc.poll() is None:
                 vm.kill()
+
+    # Look at the raw disk from outside the guest: the text written to
+    # /home (on the data volume) is readable on an unencrypted disk and
+    # must not be on an encrypted one.
+    if error is None:
+        needle = b"cidint acceptance file"
+        found, tail = False, b""
+        with open(disk, "rb") as f:
+            while True:
+                block = f.read(8 * 1024 * 1024)
+                if not block:
+                    break
+                if needle in tail + block:
+                    found = True
+                    break
+                tail = block[-len(needle):]
+        if args.passphrase is not None:
+            step("encryption: the user file's text is not readable on the raw disk", not found)
+        else:
+            step("control: without encryption the user file's text is readable on the raw disk", found)
 
     passed = all(r["passed"] for r in results)
     summary = {

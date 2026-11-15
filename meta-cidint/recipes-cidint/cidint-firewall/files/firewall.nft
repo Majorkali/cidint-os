@@ -1,0 +1,34 @@
+#!/usr/sbin/nft -f
+# CIDINT OS host firewall: inbound and forwarded traffic is dropped unless
+# a rule below allows it. Outbound traffic is allowed. No service port is
+# open by default; editions that offer a service add their own rule file.
+flush ruleset
+
+table inet cidint_filter {
+    chain input {
+        type filter hook input priority filter; policy drop;
+
+        ct state established,related accept
+        ct state invalid drop
+        iifname "lo" accept
+
+        # Error and neighbour messages the network needs to work. Echo
+        # requests (ping) are not answered.
+        icmp type { destination-unreachable, time-exceeded, parameter-problem } accept
+        icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept
+
+        # Address configuration replies (DHCPv4, DHCPv6 client).
+        udp sport 67 udp dport 68 accept
+        ip6 saddr fe80::/10 udp dport 546 accept
+
+        counter comment "cidint-default-deny" drop
+    }
+
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+    }
+
+    chain output {
+        type filter hook output priority filter; policy accept;
+    }
+}

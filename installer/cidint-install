@@ -16,6 +16,10 @@
 #   - mounted disks, read-only devices and the live medium are refused
 #   - --dry-run performs every check and changes nothing
 #
+# Optional: --encrypt-data puts the data volume in a LUKS2 container that
+# is unlocked with a passphrase at every start. The system slots hold no
+# user data and are not encrypted. A lost passphrase cannot be recovered.
+#
 # Exit codes: 0 installed (or dry run ok), 1 failure, 2 usage,
 #             6 not root, 7 refused to protect data.
 set -eu
@@ -28,6 +32,11 @@ TARGET=""
 CONFIRM=""
 SOURCE=""
 DRY=0
+ENCRYPT=0
+PASS_FILE=""
+ROOTPW_FILE=""
+KARGS=""
+MAPPER=cidint-data
 ERASE_EXISTING=0
 LIST=0
 
@@ -40,6 +49,8 @@ usage() {
 Usage: $PROG --list
        $PROG --target /dev/DISK [--dry-run] [--erase-existing]
                     [--confirm-erase /dev/DISK] [--source DIR]
+                    [--encrypt-data [--passphrase-file FILE]]
+                    [--root-password-file FILE] [--kernel-args "ARGS"]
 
   --list             show the disks that could be chosen; changes nothing
   --target DEV       whole disk to install to. ALL DATA ON IT IS ERASED.
@@ -48,6 +59,13 @@ Usage: $PROG --list
   --confirm-erase D  confirm the erase without a prompt; must equal --target
   --source DIR       directory holding rootfs.img, bzImage and EFI/BOOT
                      (default: found on the live medium)
+  --encrypt-data     encrypt the data volume (LUKS2). The passphrase is
+                     asked for at every start; if it is lost, the data is lost.
+  --passphrase-file F   read the passphrase from the first line of F
+                     instead of asking (unattended installs)
+  --root-password-file F   set the root password of the installed system
+                     from the first line of F (asked for when interactive)
+  --kernel-args ARGS extra kernel arguments for the installed system
 EOF
 }
 
@@ -57,6 +75,10 @@ while [ $# -gt 0 ]; do
         --target) [ $# -ge 2 ] || { usage >&2; exit 2; }; TARGET="$2"; shift ;;
         --confirm-erase) [ $# -ge 2 ] || { usage >&2; exit 2; }; CONFIRM="$2"; shift ;;
         --source) [ $# -ge 2 ] || { usage >&2; exit 2; }; SOURCE="$2"; shift ;;
+        --passphrase-file) [ $# -ge 2 ] || { usage >&2; exit 2; }; PASS_FILE="$2"; shift ;;
+        --root-password-file) [ $# -ge 2 ] || { usage >&2; exit 2; }; ROOTPW_FILE="$2"; shift ;;
+        --kernel-args) [ $# -ge 2 ] || { usage >&2; exit 2; }; KARGS="$2"; shift ;;
+        --encrypt-data) ENCRYPT=1 ;;
         --dry-run) DRY=1 ;;
         --erase-existing) ERASE_EXISTING=1 ;;
         -h|--help) usage; exit 0 ;;
@@ -149,6 +171,24 @@ fi
 
 DATA_MIB=$(( BYTES / 1048576 - 128 - 1024 - 1024 - 2 ))
 
+# Secrets are checked before anything is erased.
+first_line() { IFS= read -r _l < "$1" || true; printf '%s' "$_l"; }
+ask_secret() {   # ask_secret "what" -> value in $SECRET (asked twice)
+    stty -echo
+    printf '%s: ' "$1"; IFS= read -r SECRET || SECRET=""; echo
+    printf 'Repeat %s: ' "$1"; IFS= read -r _again || _again=""; echo
+    stty echo
+    [ "$SECRET" = "$_again" ] || refuse "the two entries differ; nothing was changed"
+}
+
+[ -z "$PASS_FILE" ] || [ "$ENCRYPT" -eq 1 ] || { echo "$PROG: --passphrase-file needs --encrypt-data" >&2; exit 2; }
+if [ "$ENCRYPT" -eq 1 ]; then
+    command -v cryptsetup >/dev/null 2>&1 || fail "cryptsetup is not available on this system"
+    [ -e /dev/mapper/$MAPPER-install ] && refuse "/dev/mapper/$MAPPER-install already exists"
+    [ -z "$PASS_FILE" ] || [ -r "$PASS_FILE" ] || fail "cannot read $PASS_FILE"
+fi
+[ -z "$ROOTPW_FILE" ] || [ -r "$ROOTPW_FILE" ] || fail "cannot read $ROOTPW_FILE"
+
 echo
 echo "Installation plan"
 echo "  source      : $SRC (system image $(( IMG_BYTES / 1048576 )) MiB)"
@@ -157,7 +197,11 @@ echo "  existing    : $([ "$HAS_CONTENT" -eq 1 ] && echo 'partitions or data pre
 echo "  1 esp          128 MiB  FAT32"
 echo "  2 system-a    1024 MiB  system image, mounted read-only"
 echo "  3 system-b    1024 MiB  empty, reserved for updates"
-echo "  4 cidint-data ${DATA_MIB} MiB  ext4, /data (not encrypted in this release)"
+if [ "$ENCRYPT" -eq 1 ]; then
+    echo "  4 cidint-data ${DATA_MIB} MiB  LUKS2 (passphrase at every start), ext4 inside, /data"
+else
+    echo "  4 cidint-data ${DATA_MIB} MiB  ext4, /data, NOT ENCRYPTED (use --encrypt-data)"
+fi
 echo
 
 if [ "$DRY" -eq 1 ]; then
@@ -173,9 +217,34 @@ if [ "$CONFIRM" != "$TARGET" ]; then
     [ "$answer" = "$TARGET" ] || refuse "confirmation did not match; nothing was changed"
 fi
 
+PASSPHRASE=""
+if [ "$ENCRYPT" -eq 1 ]; then
+    if [ -n "$PASS_FILE" ]; then
+        PASSPHRASE=$(first_line "$PASS_FILE")
+    else
+        [ -t 0 ] || refuse "no passphrase given; use --passphrase-file FILE"
+        echo "Choose the passphrase for the data volume. If it is lost, the data cannot be recovered."
+        ask_secret "Data volume passphrase"; PASSPHRASE=$SECRET
+    fi
+    [ "${#PASSPHRASE}" -ge 8 ] || refuse "the passphrase must have at least 8 characters; nothing was changed"
+fi
+ROOTPW=""
+if [ -n "$ROOTPW_FILE" ]; then
+    ROOTPW=$(first_line "$ROOTPW_FILE")
+    [ -n "$ROOTPW" ] || refuse "$ROOTPW_FILE is empty; nothing was changed"
+elif [ -t 0 ]; then
+    echo "Set the root password of the installed system (empty: keep the development default, no password)."
+    ask_secret "Root password"; ROOTPW=$SECRET
+fi
+case "$ROOTPW" in *:*) refuse "the root password must not contain ':'; nothing was changed" ;; esac
+
 # ---- point of no return ---------------------------------------------------
 
+mkdir -p "$WORK"
+KEY="$WORK/key"
 cleanup() {
+    rm -f "$KEY"
+    cryptsetup close "$MAPPER-install" 2>/dev/null || true
     umount "$WORK/root" 2>/dev/null || true
     umount "$WORK/esp" 2>/dev/null || true
     umount "$WORK/src" 2>/dev/null || true
@@ -202,7 +271,23 @@ done
 
 say "creating filesystems"
 mkfs.vfat -F 32 -n ESP "${P}1" >/dev/null
-mkfs.ext4 -q -F -L cidint-data "${P}4"
+if [ "$ENCRYPT" -eq 1 ]; then
+    say "encrypting the data volume (LUKS2)"
+    ( umask 077; printf '%s' "$PASSPHRASE" > "$KEY" )
+    cryptsetup luksFormat --type luks2 --batch-mode --label cidint-data-luks         --key-file "$KEY" "${P}4" || fail "could not create the encrypted volume"
+    cryptsetup open --type luks2 --key-file "$KEY" "${P}4" "$MAPPER-install"         || fail "could not open the new encrypted volume"
+    rm -f "$KEY"
+    DATA_DEV="/dev/mapper/$MAPPER-install"
+else
+    DATA_DEV="${P}4"
+fi
+mkfs.ext4 -q -F -L cidint-data "$DATA_DEV"
+e2fsck -fn "$DATA_DEV" >/dev/null 2>&1 || fail "data volume failed its filesystem check"
+if [ "$ENCRYPT" -eq 1 ]; then
+    sync
+    cryptsetup close "$MAPPER-install" || fail "could not close the encrypted volume"
+    [ "$(blkid -o value -s TYPE "${P}4")" = "crypto_LUKS" ] || fail "data partition is not a LUKS volume after formatting"
+fi
 
 say "writing the system image to ${P}2"
 # Plain dd plus sync: busybox dd does not always support conv=fsync.
@@ -222,10 +307,24 @@ say "configuring mounts"
 mkdir -p "$WORK/root" "$WORK/esp"
 mount "${P}2" "$WORK/root"
 mkdir -p "$WORK/root/boot" "$WORK/root/data"
+if [ "$ENCRYPT" -eq 1 ]; then
+    echo "$MAPPER	PARTUUID=$UUID_DATA	none	luks" > "$WORK/root/etc/crypttab"
+    chmod 600 "$WORK/root/etc/crypttab"
+    DATA_SPEC="/dev/mapper/$MAPPER"
+else
+    DATA_SPEC="PARTUUID=$UUID_DATA"
+fi
 cat >> "$WORK/root/etc/fstab" <<EOF
 PARTUUID=$UUID_ESP	/boot	vfat	defaults	0	0
-PARTUUID=$UUID_DATA	/data	ext4	defaults	0	2
+$DATA_SPEC	/data	ext4	defaults	0	2
 EOF
+if [ -n "$ROOTPW" ]; then
+    say "setting the root password"
+    printf 'root:%s
+' "$ROOTPW" | chpasswd -R "$WORK/root" -c SHA512 2>/dev/null         || printf 'root:%s
+' "$ROOTPW" | chpasswd -R "$WORK/root"         || fail "could not set the root password"
+    grep -q '^root:\$' "$WORK/root/etc/shadow" || fail "the root password was not stored as a hash"
+fi
 sync
 umount "$WORK/root"
 
@@ -241,7 +340,7 @@ default=boot
 timeout=3
 
 menuentry 'CIDINT OS' --id boot {
-    linux /bzImage root=PARTUUID=$UUID_A rootwait rootfstype=ext4 ro cidint.mode=installed $CONSOLES
+    linux /bzImage root=PARTUUID=$UUID_A rootwait rootfstype=ext4 ro cidint.mode=installed $CONSOLES $KARGS
 }
 EOF
 sync
@@ -249,9 +348,13 @@ umount "$WORK/esp"
 
 say "verifying the written system image"
 e2fsck -fn "${P}2" >/dev/null 2>&1 || fail "system partition failed its filesystem check"
-e2fsck -fn "${P}4" >/dev/null 2>&1 || fail "data partition failed its filesystem check"
 
 sync
 echo
 say "installation finished. Remove the live medium and restart."
-say "the data volume is NOT encrypted in this release."
+if [ "$ENCRYPT" -eq 1 ]; then
+    say "the data volume is encrypted; its passphrase is asked for at every start."
+else
+    say "the data volume is NOT encrypted (--encrypt-data was not given)."
+fi
+[ -n "$ROOTPW" ] || say "WARNING: root has no password on the installed system."

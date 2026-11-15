@@ -32,6 +32,18 @@ repos:
       meta-poky:
       meta-yocto-bsp:
 
+  # OpenEmbedded layers for cryptsetup (meta-oe) and nftables
+  # (meta-networking; meta-python is a declared dependency of that layer).
+  # Resolved from refs/heads/scarthgap on 2026-11-15.
+  meta-openembedded:
+    url: https://git.openembedded.org/meta-openembedded
+    branch: scarthgap
+    commit: 2db6aece32c7f8ebf6015b468e1b4e21de072e3b
+    layers:
+      meta-oe:
+      meta-python:
+      meta-networking:
+
 local_conf_header:
   cidint-dev: |
     EXTRA_IMAGE_FEATURES += "debug-tweaks"

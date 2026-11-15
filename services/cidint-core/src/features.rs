@@ -87,9 +87,27 @@ pub const FEATURES: &[Feature] = &[
     ),
     f(
         "persistence",
-        "LUKS2 encrypted data volume, TPM/FIDO2 unlock",
+        "LUKS2 encrypted data volume (installer option, passphrase at boot)",
+        Untested,
+        "installer option and QEMU test written; results in docs/TESTING.md",
+    ),
+    f(
+        "persistence",
+        "TPM/FIDO2 unlock, recovery keys, encrypted system slots",
         Planned,
         "",
+    ),
+    f(
+        "security",
+        "Host firewall, inbound default-deny (nftables)",
+        Untested,
+        "rule set and QEMU traffic test written; results in docs/TESTING.md",
+    ),
+    f(
+        "security",
+        "Root password set at installation",
+        Untested,
+        "installer option written; the live ISO itself still has no root password",
     ),
     f(
         "backup",
