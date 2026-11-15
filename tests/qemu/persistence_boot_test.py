@@ -33,10 +33,14 @@ CMD_TIMEOUT = 120
 
 
 class Vm:
-    def __init__(self, image: Path, code: Path, nvram: Path, log, cdrom: bool = False):
+    def __init__(self, image: Path, code: Path, nvram: Path, log, cdrom: bool = False,
+                 extra_disk: Path | None = None):
         accel = ["-enable-kvm", "-cpu", "host"] if os.access("/dev/kvm", os.W_OK) else ["-cpu", "max"]
         if cdrom:
             media = ["-cdrom", str(image)]
+            if extra_disk is not None:
+                media += ["-drive", f"file={extra_disk},format=raw,if=none,id=disk0",
+                          "-device", "ide-hd,drive=disk0,bus=ide.0"]
         else:
             media = ["-drive", f"file={image},format=raw,if=none,id=disk0",
                      "-device", "ide-hd,drive=disk0,bus=ide.0"]

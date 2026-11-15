@@ -11,6 +11,8 @@ IMAGE_FSTYPES = "iso"
 APPEND:append = " cidint.mode=amnesic"
 
 # Only a live boot entry. The Yocto reference installer is not offered:
-# it would lay out a disk without the CIDINT data volume, and CIDINT has
-# no installer of its own yet.
+# it would lay out a disk without the CIDINT data volume. Installation is
+# done from the live session with cidint-install, which asks first.
 LABELS_LIVE = "boot"
+
+IMAGE_INSTALL:append = " cidint-installer"

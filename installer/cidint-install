@@ -1,0 +1,254 @@
+#!/bin/sh
+# cidint-install - install CIDINT OS from the live medium onto a disk.
+#
+# Creates the CIDINT layout on the target disk (GPT, UEFI):
+#   1 esp          128 MiB   boot loader and kernel
+#   2 system-a    1024 MiB   read-only system image
+#   3 system-b    1024 MiB   reserved for A/B updates (left empty)
+#   4 cidint-data  the rest  /data: everything that must survive
+#
+# THIS ERASES THE TARGET DISK. Safety rules, all enforced below:
+#   - the target must be named explicitly; nothing is ever auto-selected
+#   - a disk that already has a partition table or filesystem is refused
+#     unless --erase-existing is given
+#   - the erase must be confirmed by typing the device path (or by
+#     repeating it with --confirm-erase for unattended installs)
+#   - mounted disks, read-only devices and the live medium are refused
+#   - --dry-run performs every check and changes nothing
+#
+# Exit codes: 0 installed (or dry run ok), 1 failure, 2 usage,
+#             6 not root, 7 refused to protect data.
+set -eu
+
+PROG=cidint-install
+WORK=/run/cidint-install
+MIN_BYTES=4294967296   # 4 GiB
+
+TARGET=""
+CONFIRM=""
+SOURCE=""
+DRY=0
+ERASE_EXISTING=0
+LIST=0
+
+say()    { echo "$PROG: $*"; }
+fail()   { echo "$PROG: error: $*" >&2; exit 1; }
+refuse() { echo "$PROG: refused: $*" >&2; exit 7; }
+
+usage() {
+    cat <<EOF
+Usage: $PROG --list
+       $PROG --target /dev/DISK [--dry-run] [--erase-existing]
+                    [--confirm-erase /dev/DISK] [--source DIR]
+
+  --list             show the disks that could be chosen; changes nothing
+  --target DEV       whole disk to install to. ALL DATA ON IT IS ERASED.
+  --dry-run          run every check, print the plan, change nothing
+  --erase-existing   allow a disk that already holds partitions or data
+  --confirm-erase D  confirm the erase without a prompt; must equal --target
+  --source DIR       directory holding rootfs.img, bzImage and EFI/BOOT
+                     (default: found on the live medium)
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --list) LIST=1 ;;
+        --target) [ $# -ge 2 ] || { usage >&2; exit 2; }; TARGET="$2"; shift ;;
+        --confirm-erase) [ $# -ge 2 ] || { usage >&2; exit 2; }; CONFIRM="$2"; shift ;;
+        --source) [ $# -ge 2 ] || { usage >&2; exit 2; }; SOURCE="$2"; shift ;;
+        --dry-run) DRY=1 ;;
+        --erase-existing) ERASE_EXISTING=1 ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "$PROG: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+    esac
+    shift
+done
+
+disk_bytes() { echo $(( $(cat "/sys/block/$1/size") * 512 )); }
+disk_model() { cat "/sys/block/$1/device/model" 2>/dev/null | sed 's/ *$//' || true; }
+
+list_disks() {
+    printf '%-14s %-12s %-4s %s\n' DEVICE SIZE-MiB RO MODEL
+    for d in /sys/block/*; do
+        n=$(basename "$d")
+        case "$n" in loop*|ram*|zram*|dm-*|md*) continue ;; esac
+        printf '%-14s %-12s %-4s %s\n' "/dev/$n" "$(( $(disk_bytes "$n") / 1048576 ))" \
+            "$(cat "$d/ro")" "$(disk_model "$n")"
+    done
+}
+
+if [ "$LIST" -eq 1 ]; then
+    list_disks
+    exit 0
+fi
+
+[ -n "$TARGET" ] || { usage >&2; exit 2; }
+[ "$(id -u)" -eq 0 ] || { echo "$PROG: must be run as root" >&2; exit 6; }
+
+# ---- checks: nothing below this line writes until "point of no return" ----
+
+[ -b "$TARGET" ] || refuse "$TARGET is not a block device"
+NAME=$(basename "$TARGET")
+[ -d "/sys/block/$NAME" ] || refuse "$TARGET is a partition or not a whole disk; name the disk itself"
+[ "$(cat "/sys/block/$NAME/ro")" = "0" ] || refuse "$TARGET is read-only"
+[ "$(cat "/sys/block/$NAME/size")" != "0" ] || refuse "$TARGET has no medium"
+
+BYTES=$(disk_bytes "$NAME")
+[ "$BYTES" -ge "$MIN_BYTES" ] || refuse "$TARGET is $(( BYTES / 1048576 )) MiB; at least 4096 MiB is required"
+
+if grep -q "^/dev/$NAME[p0-9]* " /proc/mounts; then
+    refuse "$TARGET or one of its partitions is mounted"
+fi
+if grep -q "^/dev/$NAME" /proc/swaps 2>/dev/null; then
+    refuse "$TARGET is in use as swap"
+fi
+
+# Locate the installation source.
+find_source() {
+    if [ -n "$SOURCE" ]; then echo "$SOURCE"; return 0; fi
+    while read -r _dev mnt _rest; do
+        if [ -f "$mnt/rootfs.img" ]; then echo "$mnt"; return 0; fi
+    done < /proc/mounts
+    mkdir -p "$WORK/src"
+    for dev in /dev/sr0 /dev/sr1 $(blkid -t TYPE=iso9660 -o device 2>/dev/null || true); do
+        [ -b "$dev" ] || continue
+        if mount -o ro "$dev" "$WORK/src" 2>/dev/null; then
+            if [ -f "$WORK/src/rootfs.img" ]; then echo "$WORK/src"; return 0; fi
+            umount "$WORK/src" 2>/dev/null || true
+        fi
+    done
+    return 1
+}
+
+SRC=$(find_source) || fail "installation source (rootfs.img) not found; use --source DIR"
+for f in rootfs.img bzImage EFI/BOOT/bootx64.efi; do
+    [ -f "$SRC/$f" ] || fail "installation source $SRC lacks $f"
+done
+
+SRC_DEV=$(awk -v m="$SRC" '$2 == m { d = $1 } END { print d }' /proc/mounts)
+case "$SRC_DEV" in
+    "/dev/$NAME"|"/dev/$NAME"[p0-9]*) refuse "$TARGET is the medium this system is running from" ;;
+esac
+
+IMG_BYTES=$(stat -c %s "$SRC/rootfs.img")
+[ "$IMG_BYTES" -le 1073741824 ] || fail "system image is $IMG_BYTES bytes; it does not fit the 1024 MiB system slot"
+
+# Does the disk already hold something?
+HAS_CONTENT=0
+for p in "/sys/block/$NAME/$NAME"*; do
+    [ -e "$p" ] && HAS_CONTENT=1
+done
+if [ -n "$(blkid -p -o value -s PTTYPE "$TARGET" 2>/dev/null || true)" ] || \
+   [ -n "$(blkid -p -o value -s TYPE "$TARGET" 2>/dev/null || true)" ]; then
+    HAS_CONTENT=1
+fi
+if [ "$HAS_CONTENT" -eq 1 ] && [ "$ERASE_EXISTING" -ne 1 ]; then
+    refuse "$TARGET already contains a partition table or filesystem. Back up anything you need, then repeat with --erase-existing"
+fi
+
+DATA_MIB=$(( BYTES / 1048576 - 128 - 1024 - 1024 - 2 ))
+
+echo
+echo "Installation plan"
+echo "  source      : $SRC (system image $(( IMG_BYTES / 1048576 )) MiB)"
+echo "  target      : $TARGET  $(( BYTES / 1048576 )) MiB  $(disk_model "$NAME")"
+echo "  existing    : $([ "$HAS_CONTENT" -eq 1 ] && echo 'partitions or data present - WILL BE ERASED' || echo 'none detected')"
+echo "  1 esp          128 MiB  FAT32"
+echo "  2 system-a    1024 MiB  system image, mounted read-only"
+echo "  3 system-b    1024 MiB  empty, reserved for updates"
+echo "  4 cidint-data ${DATA_MIB} MiB  ext4, /data (not encrypted in this release)"
+echo
+
+if [ "$DRY" -eq 1 ]; then
+    say "dry run: all checks passed, nothing was changed"
+    exit 0
+fi
+
+if [ "$CONFIRM" != "$TARGET" ]; then
+    [ -z "$CONFIRM" ] || refuse "--confirm-erase '$CONFIRM' does not match the target '$TARGET'"
+    [ -t 0 ] || refuse "no confirmation given; repeat with --confirm-erase $TARGET"
+    printf 'Everything on %s will be erased. Type the device path to continue: ' "$TARGET"
+    read -r answer || answer=""
+    [ "$answer" = "$TARGET" ] || refuse "confirmation did not match; nothing was changed"
+fi
+
+# ---- point of no return ---------------------------------------------------
+
+cleanup() {
+    umount "$WORK/root" 2>/dev/null || true
+    umount "$WORK/esp" 2>/dev/null || true
+    umount "$WORK/src" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+case "$NAME" in
+    *[0-9]) P="${TARGET}p" ;;
+    *)      P="$TARGET" ;;
+esac
+
+say "partitioning $TARGET"
+sfdisk --wipe always --wipe-partitions always "$TARGET" <<EOF
+label: gpt
+size=128MiB, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="esp"
+size=1024MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="system-a"
+size=1024MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="system-b"
+type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="cidint-data"
+EOF
+udevadm settle 2>/dev/null || sleep 3
+for n in 1 2 3 4; do
+    [ -b "${P}${n}" ] || fail "partition ${P}${n} did not appear"
+done
+
+say "creating filesystems"
+mkfs.vfat -F 32 -n ESP "${P}1" >/dev/null
+mkfs.ext4 -q -F -L cidint-data "${P}4"
+
+say "writing the system image to ${P}2"
+dd if="$SRC/rootfs.img" of="${P}2" bs=4M conv=fsync 2>/dev/null
+e2fsck -fy "${P}2" >/dev/null 2>&1 || [ $? -le 1 ] || fail "system image failed its filesystem check after writing"
+resize2fs "${P}2" >/dev/null 2>&1 || fail "could not grow the system filesystem"
+
+udevadm settle 2>/dev/null || true
+UUID_ESP=$(blkid -o value -s PARTUUID "${P}1")
+UUID_A=$(blkid -o value -s PARTUUID "${P}2")
+UUID_DATA=$(blkid -o value -s PARTUUID "${P}4")
+[ -n "$UUID_ESP" ] && [ -n "$UUID_A" ] && [ -n "$UUID_DATA" ] || fail "could not read partition identifiers"
+
+say "configuring mounts"
+mkdir -p "$WORK/root" "$WORK/esp"
+mount "${P}2" "$WORK/root"
+mkdir -p "$WORK/root/boot" "$WORK/root/data"
+cat >> "$WORK/root/etc/fstab" <<EOF
+PARTUUID=$UUID_ESP	/boot	vfat	defaults	0	0
+PARTUUID=$UUID_DATA	/data	ext4	defaults	0	2
+EOF
+sync
+umount "$WORK/root"
+
+say "installing the boot loader"
+mount "${P}1" "$WORK/esp"
+mkdir -p "$WORK/esp/EFI/BOOT"
+cp "$SRC/EFI/BOOT/bootx64.efi" "$WORK/esp/EFI/BOOT/bootx64.efi"
+cp "$SRC/bzImage" "$WORK/esp/bzImage"
+CONSOLES=$(tr ' ' '\n' < /proc/cmdline | grep '^console=' | tr '\n' ' ' || true)
+cat > "$WORK/esp/EFI/BOOT/grub.cfg" <<EOF
+serial --unit=0 --speed=115200 --word=8 --parity=no --stop=1
+default=boot
+timeout=3
+
+menuentry 'CIDINT OS' --id boot {
+    linux /bzImage root=PARTUUID=$UUID_A rootwait rootfstype=ext4 ro cidint.mode=installed $CONSOLES
+}
+EOF
+sync
+umount "$WORK/esp"
+
+say "verifying the written system image"
+e2fsck -fn "${P}2" >/dev/null 2>&1 || fail "system partition failed its filesystem check"
+e2fsck -fn "${P}4" >/dev/null 2>&1 || fail "data partition failed its filesystem check"
+
+sync
+echo
+say "installation finished. Remove the live medium and restart."
+say "the data volume is NOT encrypted in this release."

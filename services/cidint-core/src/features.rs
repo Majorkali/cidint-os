@@ -141,7 +141,13 @@ pub const FEATURES: &[Feature] = &[
     ),
     f(
         "build",
-        "Persistent live USB, installer, server and recovery ISOs",
+        "Console installer (cidint-install) with the CIDINT disk layout",
+        Untested,
+        "script and QEMU install test written; results in docs/TESTING.md",
+    ),
+    f(
+        "build",
+        "Persistent live USB, graphical installer, server and recovery ISOs",
         Planned,
         "",
     ),

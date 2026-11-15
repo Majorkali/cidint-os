@@ -145,12 +145,15 @@ jobs:
             artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso \
             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: Install to a blank disk, then persistence test (QEMU, UEFI)
+        run: |
+          scripts/ci-run.sh "QEMU install test" python3 tests/qemu/install_test.py             artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
       - name: Test summary
         if: always()
         run: |
-          for r in artifacts/qemu-test/persistence-report.json artifacts/qemu-test/live-report.json; do
+          for r in artifacts/qemu-test/persistence-report.json artifacts/qemu-test/live-report.json artifacts/qemu-test/install-report.json artifacts/qemu-test/installed/persistence-report.json; do
             [ -f "$r" ] || continue
-            echo "::notice title=$(basename "$r")::$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print('kvm=%s; ' % d.get('kvm') + '; '.join(('PASS ' if x['passed'] else 'FAIL ') + x['test'] for x in d['results']))" "$r" | cut -c1-3000)"
+            echo "::notice title=$r::$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print('kvm=%s; ' % d.get('kvm') + '; '.join(('PASS ' if x['passed'] else 'FAIL ') + x['test'] for x in d['results']))" "$r" | cut -c1-3000)"
           done
       - name: Upload test evidence
         if: always()
@@ -162,6 +165,10 @@ jobs:
             artifacts/qemu-test/persistence-report.json
             artifacts/qemu-test/live-serial.log
             artifacts/qemu-test/live-report.json
+            artifacts/qemu-test/install-serial.log
+            artifacts/qemu-test/install-report.json
+            artifacts/qemu-test/installed/serial.log
+            artifacts/qemu-test/installed/persistence-report.json
       - name: Compress disk image and write checksums
         run: |
           set -euo pipefail
