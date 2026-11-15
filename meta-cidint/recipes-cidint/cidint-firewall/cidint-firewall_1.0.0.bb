@@ -22,3 +22,18 @@ do_install() {
 }
 
 RDEPENDS:${PN} = "nftables"
+
+# Connection tracking for the rule set. These exist as packages only when
+# the kernel builds them as modules; when they are built in, the names do
+# not exist and the recommendation is ignored.
+RRECOMMENDS:${PN} = "\
+    kernel-module-nf-conntrack \
+    kernel-module-nft-ct \
+    kernel-module-nf-defrag-ipv4 \
+    kernel-module-nf-defrag-ipv6 \
+    kernel-module-nf-tables \
+    kernel-module-nft-reject \
+    kernel-module-nft-reject-inet \
+    kernel-module-nft-log \
+    kernel-module-nft-limit \
+"
