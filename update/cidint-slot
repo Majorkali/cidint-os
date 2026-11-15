@@ -99,14 +99,14 @@ cmd_install() {
     resize2fs "$DEV" >/dev/null 2>&1 || fail "could not grow the filesystem"
 
     # Carry this machine's settings over to the new system: mounts,
-    # the encrypted-volume table and the root password.
+    # the encrypted data volume's identity and the root password.
     mkdir -p "$WORK/new"
     mount "$DEV" "$WORK/new"
     trap 'umount "$WORK/new" 2>/dev/null || true' EXIT
     awk '$2 == "/boot" || $2 == "/data"' /etc/fstab >> "$WORK/new/etc/fstab"
-    if [ -f /etc/crypttab ]; then
-        cat /etc/crypttab > "$WORK/new/etc/crypttab"
-        chmod 600 "$WORK/new/etc/crypttab"
+    if [ -f /etc/cidint/data-volume ]; then
+        mkdir -p "$WORK/new/etc/cidint"
+        cat /etc/cidint/data-volume > "$WORK/new/etc/cidint/data-volume"
     fi
     HASH=$(awk -F: '$1 == "root" { print $2 }' /etc/shadow)
     awk -F: -v OFS=: -v h="$HASH" '$1 == "root" { $2 = h } { print }' "$WORK/new/etc/shadow" > "$WORK/shadow.new"

@@ -1,0 +1,21 @@
+[Unit]
+Description=CIDINT encrypted data volume (unlock, check, mount)
+Documentation=https://github.com/Majorkali/cidint-os/blob/main/docs/PERSISTENCE.md
+DefaultDependencies=no
+ConditionPathExists=/etc/cidint/data-volume
+After=systemd-udevd.service systemd-udev-trigger.service
+Wants=systemd-udevd.service
+Before=cidint-data-setup.service home.mount local-fs.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Waiting for the passphrase has no time limit.
+TimeoutStartSec=0
+ExecStart=/usr/sbin/cidint-data-unlock
+ExecStop=-/bin/umount /data
+ExecStop=-/usr/sbin/cryptsetup close cidint-data
+
+[Install]
+RequiredBy=local-fs.target

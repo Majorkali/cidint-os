@@ -312,16 +312,15 @@ mkdir -p "$WORK/root" "$WORK/esp"
 mount "${P}2" "$WORK/root"
 mkdir -p "$WORK/root/boot" "$WORK/root/data"
 if [ "$ENCRYPT" -eq 1 ]; then
-    echo "$MAPPER	PARTUUID=$UUID_DATA	none	luks" > "$WORK/root/etc/crypttab"
-    chmod 600 "$WORK/root/etc/crypttab"
-    DATA_SPEC="/dev/mapper/$MAPPER"
+    # Unlocked, checked and mounted at start-up by cidint-data-unlock.
+    mkdir -p "$WORK/root/etc/cidint"
+    echo "PARTUUID=$UUID_DATA" > "$WORK/root/etc/cidint/data-volume"
+    DATA_SPEC=""
 else
     DATA_SPEC="PARTUUID=$UUID_DATA"
 fi
-cat >> "$WORK/root/etc/fstab" <<EOF
-PARTUUID=$UUID_ESP	/boot	vfat	defaults	0	0
-$DATA_SPEC	/data	ext4	defaults	0	2
-EOF
+echo "PARTUUID=$UUID_ESP	/boot	vfat	defaults	0	0" >> "$WORK/root/etc/fstab"
+[ -z "$DATA_SPEC" ] || echo "$DATA_SPEC	/data	ext4	defaults	0	2" >> "$WORK/root/etc/fstab"
 if [ -n "$ROOTPW" ]; then
     say "setting the root password"
     HASH=$(printf '%s' "$ROOTPW" | openssl passwd -6 -stdin) || fail "could not hash the root password"

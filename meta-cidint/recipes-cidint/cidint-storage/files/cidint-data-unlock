@@ -1,0 +1,62 @@
+#!/bin/sh
+# cidint-data-unlock - unlock and mount the encrypted CIDINT data volume.
+#
+# Runs early at start-up on systems installed with --encrypt-data. The
+# partition is named in /etc/cidint/data-volume (PARTUUID=...). The
+# passphrase is asked for on the console; a wrong one can be retried.
+#
+# This is done here, in one step, instead of through /etc/crypttab and
+# /etc/fstab: with those, the file system check and the mount are bound
+# to the device unit of the mapped volume, and a brief change of that
+# unit's state right after unlocking was seen to cancel the check and
+# leave the system running without its data volume.
+set -u
+
+CONF=/etc/cidint/data-volume
+NAME=cidint-data
+TRIES=5
+
+log() { echo "cidint-data-unlock: $*"; }
+
+[ -r "$CONF" ] || { log "$CONF not found"; exit 1; }
+SPEC=$(sed -n 's/^PARTUUID=//p' "$CONF" | head -n 1)
+[ -n "$SPEC" ] || { log "$CONF does not name a partition"; exit 1; }
+DEV="/dev/disk/by-partuuid/$SPEC"
+
+if grep -q " /data " /proc/mounts; then
+    log "/data is already mounted"
+    exit 0
+fi
+
+n=0
+while [ ! -b "$DEV" ] && [ $n -lt 90 ]; do
+    sleep 1
+    n=$((n + 1))
+done
+[ -b "$DEV" ] || { log "partition $DEV did not appear"; exit 1; }
+
+if [ ! -b "/dev/mapper/$NAME" ]; then
+    try=1
+    while :; do
+        if systemd-ask-password -n --timeout=0 "Please enter passphrase for disk $NAME (CIDINT data volume):" \
+            | cryptsetup open --type luks2 --key-file - "$DEV" "$NAME"; then
+            break
+        fi
+        log "the passphrase was not accepted (attempt $try of $TRIES)"
+        [ $try -lt $TRIES ] || { log "giving up; the data volume stays locked"; exit 1; }
+        try=$((try + 1))
+    done
+fi
+udevadm settle --timeout=30 2>/dev/null || true
+
+# Check before mounting. 0: clean, 1: errors corrected. Anything else is
+# reported and the volume is left unmounted rather than used damaged.
+e2fsck -p "/dev/mapper/$NAME"
+rc=$?
+if [ $rc -gt 1 ]; then
+    log "file system check ended with status $rc; the data volume is NOT mounted"
+    exit 1
+fi
+
+mount -t ext4 "/dev/mapper/$NAME" /data || { log "could not mount the data volume"; exit 1; }
+log "data volume unlocked and mounted"

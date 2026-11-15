@@ -108,9 +108,16 @@ def main() -> int:
             rc, boot_id = vm.run("cat /proc/sys/kernel/random/boot_id")
 
             p = ssh(["-i", str(key), "-o", "IdentitiesOnly=yes"], "cat /proc/sys/kernel/random/boot_id")
-            step("SSH: key-based login over the network reaches this guest",
-                 p.returncode == 0 and p.stdout.strip() == boot_id and boot_id != "",
-                 f"rc={p.returncode} out={p.stdout!r} err={p.stderr!r}")
+            ok = p.returncode == 0 and p.stdout.strip() == boot_id and boot_id != ""
+            detail = f"rc={p.returncode} out={p.stdout!r} err={p.stderr!r}"
+            if not ok:
+                # Say why the daemon refused, as seen from inside the guest.
+                rc, why = vm.run("journalctl -b --no-pager -o cat | grep -i sshd | tail -n 8; "
+                                 "ls -ldn / /data /data/home /home /home/root /home/root/.ssh "
+                                 "/home/root/.ssh/authorized_keys; wc -c /home/root/.ssh/authorized_keys; "
+                                 "grep '^root:' /etc/passwd; cut -d: -f1,2 /etc/shadow | head -n 1 | cut -c1-12")
+                detail += " | guest: " + why
+            step("SSH: key-based login over the network reaches this guest", ok, detail)
 
             p = ssh(["-o", "PubkeyAuthentication=no", "-o", "PreferredAuthentications=password,keyboard-interactive"],
                     "true")
