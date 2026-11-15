@@ -1,0 +1,21 @@
+#!/bin/sh
+# First program inside a CIDINT security domain (an isolated micro-VM).
+# The domain has no disk and no network card unless the host gives it one.
+mkdir -p /proc /sys /dev /run /tmp
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+exec >/dev/console 2>&1
+
+NAME=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^cidint.domain=//p' | tail -n 1)
+hostname "${NAME:-domain}"
+
+echo "CIDINT domain '$NAME' starting (kernel $(uname -r))"
+echo "domain-interfaces: $(ls /sys/class/net | tr '\n' ' ')"
+echo "domain-disks: $(ls /sys/block | grep -v -E '^(ram|loop)' | tr '\n' ' ')"
+echo "domain-memory-kb: $(sed -n 's/^MemTotal: *\([0-9]*\).*/\1/p' /proc/meminfo)"
+echo "CIDINT domain '$NAME' ready"
+
+# Nothing runs in a domain yet beyond this point; it stays up until the
+# host stops it.
+while :; do sleep 3600; done

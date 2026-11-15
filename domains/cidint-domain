@@ -1,0 +1,111 @@
+#!/bin/sh
+# cidint-domain - CIDINT security domains: isolated micro virtual machines.
+#
+# A domain is a small virtual machine with its own kernel instance. It has
+# no network card and no disk, and shares no files with the host. The
+# machine emulator itself runs as the unprivileged user "cidint-domain" in
+# a sandbox that has no network and no write access to the system.
+#
+#   cidint-domain info                 is hardware virtualisation available?
+#   cidint-domain start NAME [-m MiB]  start a domain (default 192 MiB)
+#   cidint-domain list                 running domains
+#   cidint-domain log NAME             the domain's console output
+#   cidint-domain stop NAME            stop a domain
+#
+# This release starts and isolates domains. Running applications inside
+# them and moving data between domains are not implemented.
+#
+# Exit codes: 0 ok, 1 failure, 2 usage, 6 not root, 7 refused.
+set -eu
+
+PROG=cidint-domain
+SHARE=/usr/share/cidint/domains
+RUN=/run/cidint-domains
+QEMU=/usr/bin/qemu-system-x86_64
+
+fail()   { echo "$PROG: error: $*" >&2; exit 1; }
+refuse() { echo "$PROG: refused: $*" >&2; exit 7; }
+need_root() { [ "$(id -u)" -eq 0 ] || { echo "$PROG: must be run as root in this release" >&2; exit 6; }; }
+
+valid_name() {
+    case "$1" in
+        ''|*[!a-z0-9-]*|-*) return 1 ;;
+    esac
+    [ "${#1}" -le 24 ]
+}
+
+unit() { echo "cidint-domain-$1.service"; }
+
+case "${1:-}" in
+    info)
+        if [ -c /dev/kvm ]; then
+            echo "hardware virtualisation: available (KVM)"
+        else
+            echo "hardware virtualisation: NOT available; domains run in software emulation (slow)"
+        fi
+        echo "emulator: $QEMU $([ -x "$QEMU" ] && echo '(installed)' || echo '(MISSING)')"
+        echo "domain system: $SHARE"
+        ;;
+    start)
+        need_root
+        NAME=${2:-}
+        valid_name "$NAME" || { echo "$PROG: the name may use a-z, 0-9 and '-', at most 24 characters" >&2; exit 2; }
+        MEM=192
+        if [ "${3:-}" = "-m" ]; then
+            MEM=${4:-}
+            case "$MEM" in ''|*[!0-9]*) echo "$PROG: -m needs a number of MiB" >&2; exit 2 ;; esac
+            [ "$MEM" -ge 96 ] && [ "$MEM" -le 8192 ] || refuse "memory must be between 96 and 8192 MiB"
+        fi
+        [ -f "$SHARE/bzImage" ] && [ -f "$SHARE/base.cpio.gz" ] || fail "the domain system is not installed in $SHARE"
+        ! systemctl is-active --quiet "$(unit "$NAME")" || refuse "domain '$NAME' is already running"
+        systemctl reset-failed "$(unit "$NAME")" 2>/dev/null || true
+
+        KVMGROUP=""
+        [ ! -c /dev/kvm ] || KVMGROUP="-p SupplementaryGroups=kvm"
+        # shellcheck disable=SC2086
+        systemd-run --quiet --collect --unit="$(unit "$NAME")" \
+            --description="CIDINT security domain $NAME" \
+            -p User=cidint-domain -p Group=cidint-domain $KVMGROUP \
+            -p RuntimeDirectory="cidint-domains/$NAME" -p RuntimeDirectoryMode=0700 \
+            -p PrivateNetwork=yes \
+            -p NoNewPrivileges=yes \
+            -p ProtectSystem=strict \
+            -p ProtectHome=yes \
+            -p PrivateTmp=yes \
+            -p DevicePolicy=closed -p "DeviceAllow=/dev/kvm rw" \
+            -p ProtectKernelTunables=yes -p ProtectKernelModules=yes -p ProtectControlGroups=yes \
+            -p RestrictSUIDSGID=yes -p LockPersonality=yes \
+            -p CapabilityBoundingSet= \
+            -p InaccessiblePaths=-/data \
+            "$QEMU" -name "$NAME" -machine q35,accel=kvm:tcg -cpu max -smp 1 -m "$MEM" \
+                -nodefaults -no-user-config -display none -vga none -nic none -no-reboot \
+                -kernel "$SHARE/bzImage" -initrd "$SHARE/base.cpio.gz" \
+                -append "console=ttyS0 panic=-1 cidint.domain=$NAME" \
+                -serial "file:$RUN/$NAME/console.log" \
+            || fail "could not start domain '$NAME'"
+        echo "$PROG: domain '$NAME' started ($MEM MiB)"
+        ;;
+    list)
+        systemctl list-units --plain --no-legend --state=active 'cidint-domain-*.service' \
+            | sed -n 's/^cidint-domain-\([a-z0-9-]*\)\.service.*/\1/p'
+        ;;
+    log)
+        need_root
+        NAME=${2:-}
+        valid_name "$NAME" || { echo "Usage: $PROG log NAME" >&2; exit 2; }
+        [ -f "$RUN/$NAME/console.log" ] || fail "domain '$NAME' has no console log (not running?)"
+        tr -d '\r' < "$RUN/$NAME/console.log"
+        ;;
+    stop)
+        need_root
+        NAME=${2:-}
+        valid_name "$NAME" || { echo "Usage: $PROG stop NAME" >&2; exit 2; }
+        systemctl is-active --quiet "$(unit "$NAME")" || refuse "domain '$NAME' is not running"
+        systemctl stop "$(unit "$NAME")"
+        echo "$PROG: domain '$NAME' stopped"
+        ;;
+    *)
+        sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' >&2
+        exit 2
+        ;;
+esac

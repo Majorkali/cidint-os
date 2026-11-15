@@ -201,9 +201,21 @@ pub const FEATURES: &[Feature] = &[
     ),
     f(
         "security",
-        "Security domains (KVM), transfer broker",
+        "Security domains: isolated micro-VMs (cidint-domain start/stop/list)",
+        Untested,
+        "tool and QEMU test written; nothing runs inside a domain yet",
+    ),
+    f(
+        "security",
+        "Applications in domains, transfer broker between domains",
         Planned,
         "",
+    ),
+    f(
+        "ai",
+        "Local AI engine: llama.cpp inference in a no-network sandbox (cidint-ai)",
+        Untested,
+        "tool and QEMU test written; no model is shipped, CPU baseline only",
     ),
     f(
         "privacy",

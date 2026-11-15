@@ -1,0 +1,110 @@
+#!/bin/sh
+# cidint-ai - the CIDINT local AI engine (command line).
+#
+# Runs a language model on this machine with llama.cpp. Nothing is sent
+# anywhere: every inference runs in a sandbox that has no network, runs
+# as the unprivileged user "cidint-ai", cannot gain privileges, and can
+# read the model directory but cannot write to the system or to user data.
+#
+#   cidint-ai status              engine, model directory, models found
+#   cidint-ai models              list installed models
+#   cidint-ai ask [-m MODEL] [-n TOKENS] [-s SEED] "PROMPT"
+#   cidint-ai sandbox-check       show what the sandbox allows (for tests)
+#
+# No model is shipped with CIDINT OS. Put a GGUF model file into
+# /data/apps/ai/models/ (as root). The engine answers with what the model
+# produces; it has no tools, no file access and no way to run commands.
+#
+# Exit codes: 0 ok, 1 failure, 2 usage, 3 no model installed, 6 not root.
+set -eu
+
+PROG=cidint-ai
+MODELS=/data/apps/ai/models
+ENGINE=/usr/bin/llama-completion
+USER_NAME=cidint-ai
+
+fail() { echo "$PROG: error: $*" >&2; exit 1; }
+
+list_models() { ls "$MODELS"/*.gguf 2>/dev/null || true; }
+
+# Run a command inside the inference sandbox.
+sandbox() {
+    systemd-run --quiet --wait --pipe --collect \
+        -p User="$USER_NAME" -p Group="$USER_NAME" \
+        -p PrivateNetwork=yes \
+        -p NoNewPrivileges=yes \
+        -p ProtectSystem=strict \
+        -p ProtectHome=yes \
+        -p PrivateTmp=yes \
+        -p PrivateDevices=yes \
+        -p ProtectKernelTunables=yes \
+        -p ProtectKernelModules=yes \
+        -p ProtectControlGroups=yes \
+        -p RestrictSUIDSGID=yes \
+        -p LockPersonality=yes \
+        -p CapabilityBoundingSet= \
+        -p InaccessiblePaths=-/data/home \
+        -p InaccessiblePaths=-/data/config \
+        -p InaccessiblePaths=-/data/state \
+        -p InaccessiblePaths=-/data/backup \
+        -p InaccessiblePaths=-/data/server \
+        -p MemoryMax=75% \
+        "$@"
+}
+
+need_root() { [ "$(id -u)" -eq 0 ] || { echo "$PROG: must be run as root in this release" >&2; exit 6; }; }
+
+case "${1:-}" in
+    status)
+        echo "engine          : $ENGINE $([ -x "$ENGINE" ] && echo '(installed)' || echo '(MISSING)')"
+        echo "model directory : $MODELS"
+        echo "models          : $(list_models | wc -l)"
+        echo "network access  : none (sandboxed)"
+        ;;
+    models)
+        list_models | while read -r f; do
+            [ -n "$f" ] && echo "$(basename "$f")  $(( $(stat -c %s "$f") / 1024 )) KiB"
+        done
+        ;;
+    ask)
+        need_root
+        shift
+        MODEL="" TOKENS=128 SEED=""
+        while [ $# -gt 1 ]; do
+            case "$1" in
+                -m) MODEL="$2"; shift 2 ;;
+                -n) TOKENS="$2"; shift 2 ;;
+                -s) SEED="$2"; shift 2 ;;
+                *) break ;;
+            esac
+        done
+        [ $# -eq 1 ] || { echo "Usage: $PROG ask [-m MODEL] [-n TOKENS] [-s SEED] \"PROMPT\"" >&2; exit 2; }
+        case "$TOKENS" in ''|*[!0-9]*) echo "$PROG: -n needs a number" >&2; exit 2 ;; esac
+        [ -x "$ENGINE" ] || fail "the inference engine is not installed"
+        if [ -z "$MODEL" ]; then
+            MODEL=$(list_models | head -n 1)
+        else
+            case "$MODEL" in */*) echo "$PROG: give the model's file name, not a path" >&2; exit 2 ;; esac
+            MODEL="$MODELS/$MODEL"
+        fi
+        [ -n "$MODEL" ] && [ -f "$MODEL" ] || { echo "$PROG: no model installed in $MODELS" >&2; exit 3; }
+        set -- "$ENGINE" -m "$MODEL" -no-cnv --no-display-prompt --simple-io -n "$TOKENS" -p "$1"
+        [ -z "$SEED" ] || set -- "$@" -s "$SEED"
+        sandbox "$@" 2>/dev/null
+        ;;
+    sandbox-check)
+        need_root
+        sandbox /bin/sh -c '
+            echo "user=$(id -un)"
+            echo "interfaces=$(ls /sys/class/net | tr "\n" " ")"
+            if touch /data/apps/ai/write-probe 2>/dev/null; then echo "write_data=allowed"; else echo "write_data=denied"; fi
+            if touch /usr/write-probe 2>/dev/null; then echo "write_system=allowed"; else echo "write_system=denied"; fi
+            if ls /data/home >/dev/null 2>&1; then echo "read_home=allowed"; else echo "read_home=denied"; fi
+            if ls /data/apps/ai/models >/dev/null 2>&1; then echo "read_models=allowed"; else echo "read_models=denied"; fi
+        '
+        ;;
+    *)
+        sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' >&2
+        exit 2
+        ;;
+esac

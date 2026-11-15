@@ -205,6 +205,26 @@ jobs:
             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd \
             --cdrom --workdir artifacts/qemu-test/desktop-live
+      - name: AI engine, sandbox and inference with a test model (QEMU, UEFI)
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        run: |
+          # Test fixture only: a tiny story model (about 1 MB). Not shipped.
+          mkdir -p artifacts/model
+          scripts/ci-run.sh "download test model" curl -fsSL --retry 5 -o artifacts/model/stories260K.gguf \
+            https://huggingface.co/ggml-org/models-moved/resolve/main/tinyllamas/stories260K.gguf
+          ls -l artifacts/model
+          scripts/ci-run.sh "QEMU AI test" python3 tests/qemu/ai_test.py \
+            artifacts/image/cidint-os-${CIDINT_VERSION}-x86_64.wic \
+            --model artifacts/model/stories260K.gguf \
+            --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: Security domains, two isolated micro-VMs (QEMU, UEFI)
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        run: |
+          scripts/ci-run.sh "QEMU domain test" python3 tests/qemu/domain_test.py \
+            artifacts/image/cidint-os-${CIDINT_VERSION}-x86_64.wic \
+            --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
       - name: Test summary
         if: always()
         run: |
