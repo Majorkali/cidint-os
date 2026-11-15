@@ -14,6 +14,7 @@ target:
   - cidint-image-base
   - cidint-image-live
   - cidint-image-server
+  - cidint-image-desktop
 
 repos:
   # This repository (the directory containing kas/).

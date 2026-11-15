@@ -1,0 +1,12 @@
+[Unit]
+Description=Seat management daemon (access to display and input devices)
+Documentation=man:seatd(1)
+
+[Service]
+Type=simple
+# Members of the "seat" group may open the display and input devices.
+ExecStart=/usr/bin/seatd -g seat
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

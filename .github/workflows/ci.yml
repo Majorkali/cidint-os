@@ -124,7 +124,8 @@ jobs:
           wic="$(pick 'cidint-image-base-genericx86-64*.wic')"
           iso="$(pick 'cidint-image-live-genericx86-64*.iso')"
           srv="$(pick 'cidint-image-server-genericx86-64*.wic')"
-          if [ -z "$wic" ] || [ -z "$iso" ] || [ -z "$srv" ]; then
+          dsk="$(pick 'cidint-image-desktop-genericx86-64*.wic')"
+          if [ -z "$wic" ] || [ -z "$iso" ] || [ -z "$srv" ] || [ -z "$dsk" ]; then
             echo "::error title=Collect artifacts::wic='$wic' iso='$iso' server='$srv' in $deploy: $(ls "$deploy" | tr '\n' ' ' | cut -c1-900)"
             exit 1
           fi
@@ -132,6 +133,7 @@ jobs:
           cp -L "$wic.bmap" artifacts/image/cidint-os-${CIDINT_VERSION}-x86_64.wic.bmap
           cp -L "$iso" artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso
           cp -L "$srv" artifacts/image/cidint-os-${CIDINT_VERSION}-server-x86_64.wic
+          cp -L "$dsk" artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-x86_64.wic
           cp -L "$deploy"/cidint-image-base-genericx86-64*.spdx.tar.zst artifacts/image/ 2>/dev/null || echo "no SPDX archive found"
           ls -l artifacts/image
           echo "::notice title=Image files::$(cd artifacts/image && stat -c '%n %s bytes' * | tr '\n' ';')"
@@ -186,6 +188,13 @@ jobs:
             artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso \
             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: Desktop edition, graphical session and screen contents (QEMU, UEFI)
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        run: |
+          scripts/ci-run.sh "QEMU desktop test" python3 tests/qemu/desktop_test.py \
+            artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-x86_64.wic \
+            --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
       - name: Test summary
         if: always()
         run: |
@@ -200,11 +209,13 @@ jobs:
           path: |
             artifacts/qemu-test/**/*serial.log
             artifacts/qemu-test/**/*report.json
+            artifacts/qemu-test/**/*.png
       - name: Compress disk image and write checksums
         run: |
           set -euo pipefail
           zstd -T0 --rm artifacts/image/cidint-os-${CIDINT_VERSION}-x86_64.wic
           zstd -T0 --rm artifacts/image/cidint-os-${CIDINT_VERSION}-server-x86_64.wic
+          zstd -T0 --rm artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-x86_64.wic
           cd artifacts/image
           sha256sum * > SHA256SUMS
           cat SHA256SUMS

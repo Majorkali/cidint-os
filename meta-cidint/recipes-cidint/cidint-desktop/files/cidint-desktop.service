@@ -1,0 +1,26 @@
+[Unit]
+Description=CIDINT graphical session (Weston)
+Documentation=https://github.com/Majorkali/cidint-os/blob/main/docs/STATUS.md
+Requires=seatd.service
+After=seatd.service systemd-user-sessions.service home.mount cidint-data-setup.service
+# "cidint.nogui" on the kernel command line keeps the system on the console.
+ConditionKernelCommandLine=!cidint.nogui
+
+[Service]
+# The compositor does not run as root.
+User=cidint
+Group=cidint
+SupplementaryGroups=seat video input render
+RuntimeDirectory=cidint-session
+RuntimeDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/cidint-session
+Environment=LIBSEAT_BACKEND=seatd
+Environment=HOME=/home/cidint
+# /home lives on the data volume; create this user's directory there once.
+ExecStartPre=+/bin/sh -c 'mkdir -p /home/cidint && chown cidint:cidint /home/cidint && chmod 700 /home/cidint'
+ExecStart=/usr/bin/weston --config=/etc/cidint/weston.ini --log=/run/cidint-session/weston.log
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
