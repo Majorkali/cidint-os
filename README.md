@@ -4,10 +4,10 @@
 *Intelligence Beyond Limits.*
 
 > **Status: 0.2.0 "foundation", development. Not production-ready.**
-> What exists today is the persistence and tooling foundation, tested on a
-> development host, plus a Yocto image definition that **has not been built
-> or booted yet**. There is no desktop, no installer and no ISO in this
-> release. The exact state of every feature is in [docs/STATUS.md](docs/STATUS.md);
+> What exists today is the persistence and tooling foundation and a
+> console-only x86_64 UEFI disk image that builds in CI and passes a boot,
+> reboot and power-loss test in QEMU. It has **not been run on physical
+> hardware**. There is no desktop, no installer and no ISO in this release. The exact state of every feature is in [docs/STATUS.md](docs/STATUS.md);
 > the same list is printed by `cidint features`.
 
 ## What CIDINT OS is
@@ -39,9 +39,11 @@ The first rule of the design is that data is not lost on restart:
 | Persistence-mode and volume checker | `services/cidint-core/src/layout.rs` | parser tests on mount-table fixtures |
 | `cidint` CLI (JSON, dry-run, stable exit codes, completions) | `cli/cidint` | 9 end-to-end tests on the built binary |
 
-Written but **not yet run** (needs the first CI image build): the Yocto layer
-`meta-cidint`, the A/B + data disk layout, the `/home`-on-`/data` units, the
-hardware inventory on a live system, and the QEMU reboot/power-loss test.
+| Yocto image `cidint-image-base` (read-only system, separate `/data`) | `meta-cidint`, `kas/` | built in CI; 15 boot, reboot and power-loss checks pass in QEMU (UEFI) |
+
+Results and run numbers are in [docs/TESTING.md](docs/TESTING.md). Not yet
+exercised: physical hardware, the second system slot (no update manager
+exists), and the SBOM archive's contents.
 
 ## Try the CLI
 
@@ -62,8 +64,9 @@ Commands that need a running Linux system (`hardware inventory`,
 
 ## Building the image
 
-Image builds need Linux and run on GitHub Actions (workflow **CI**, option
-*build_image*). See [docs/BUILDING.md](docs/BUILDING.md).
+Image builds need Linux and run on GitHub Actions on every push to `main`
+(workflow **CI**). The image and the test evidence are attached to each
+successful run as artifacts. See [docs/BUILDING.md](docs/BUILDING.md).
 
 ## Documentation
 

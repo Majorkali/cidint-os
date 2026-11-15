@@ -65,19 +65,19 @@ pub const FEATURES: &[Feature] = &[
         "persistence",
         "Persistence-mode and volume detection",
         Tested,
-        "parser tests on mount-table fixtures; not yet run on a booted image",
+        "parser tests; reports a consistent layout on the booted image in QEMU",
     ),
     f(
         "persistence",
         "Reboot-survival marker",
-        Untested,
-        "logic unit-tested; needs a real reboot in QEMU",
+        Tested,
+        "unit tests; survived a real reboot in QEMU",
     ),
     f(
         "persistence",
         "Separate /data volume in image",
-        Untested,
-        "wic layout written; first CI build pending",
+        Tested,
+        "file and config survive reboot and power cut in QEMU; not on hardware",
     ),
     f(
         "persistence",
@@ -124,14 +124,14 @@ pub const FEATURES: &[Feature] = &[
     f(
         "hardware",
         "Hardware inventory from /proc and /sys",
-        Untested,
-        "parsers unit-tested; live read needs Linux",
+        Tested,
+        "parser tests; live read on a GitHub Linux runner",
     ),
     f(
         "build",
         "Yocto layer, kas config, x86_64 UEFI image",
-        Untested,
-        "written; not yet built or booted",
+        Tested,
+        "built in CI, boots under UEFI in QEMU; no physical hardware yet",
     ),
     f(
         "build",
@@ -143,7 +143,7 @@ pub const FEATURES: &[Feature] = &[
         "build",
         "SBOM (SPDX) from the Yocto build",
         Untested,
-        "enabled via create-spdx; produced by the first build",
+        "enabled via create-spdx; archive contents not checked",
     ),
     f(
         "security",

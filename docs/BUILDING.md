@@ -80,8 +80,9 @@ sha256sum -c SHA256SUMS
 
 ## 5. Writing to a USB drive
 
-Not documented yet, on purpose: the image has not been booted. Once it has,
-this section will give `bmaptool` instructions. Writing an image erases the
+Not documented yet, on purpose: the image has only been booted in QEMU, never
+on physical hardware. Once it has, this section will give `bmaptool`
+instructions. Writing an image erases the
 target drive; check the device name twice.
 
 ## Pinned inputs

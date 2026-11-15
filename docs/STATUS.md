@@ -15,23 +15,26 @@ The authoritative list is `services/cidint-core/src/features.rs`
 
 - Atomic durable file replacement
 - Crash-consistent state store (write-ahead log + snapshot)
-- Persistence-mode and volume detection (logic; fixtures only)
+- Persistence-mode and volume detection (fixtures, and on the booted image)
 - Versioned deduplicating backup, verify, restore
 - Hash-chained audit log, verify, export
 - `cidint` CLI: JSON envelope (API v1), `--dry-run`, stable exit codes, shell completions
 
-Tested on: Windows 11 x86_64 development host, Rust 1.100.0 and Rust 1.75.0.
-Type-checked, not executed, for `x86_64-unknown-linux-musl`.
+- Yocto distro, layer and `cidint-image-base`: builds in CI, boots under UEFI in QEMU
+- Disk layout with a read-only system and a separate `/data` volume; `/home` on `/data`
+- Reboot-survival marker, file and configuration survival across a real reboot
+- Committed state and audit chain intact after a simulated power cut
+- Hardware inventory on a live Linux system (GitHub runner)
+
+Tested on: Windows 11 x86_64 development host (Rust 1.100.0 and 1.75.0),
+GitHub `ubuntu-22.04` runners, and the image in QEMU (q35, OVMF). The image
+tests have passed once (run 43603109904). Nothing has run on physical hardware.
 
 ## Implemented but not fully tested
 
-- Yocto distro, layer and `cidint-image-base` (never built)
-- Disk layout: ESP, system-a, system-b, cidint-data (never built)
-- `/home` bound to `/data/home`; data directory setup unit (never booted)
-- Reboot-survival marker (`cidint persistence arm` / `verify`): logic tested, no real reboot yet
-- Hardware inventory: parsers tested, live read needs Linux
-- QEMU boot / reboot / power-loss test script (never run)
-- SPDX SBOM generation (enabled; produced by the first build)
+- Second system slot `system-b`: present in the layout, empty, never booted
+- SPDX SBOM generation (enabled in the build; archive contents not checked)
+- The image on physical hardware (never tried)
 
 ## Planned (nothing exists yet)
 
@@ -67,19 +70,19 @@ iOS and legacy BlackBerry as host platforms.
 
 | Phase | Scope | State |
 |---|---|---|
-| 0 | Architecture, repository, threat model, build system, CI | done, except the first CI run |
-| 1 | Bootable x86_64 UEFI image | written, not built |
-| 2 | Persistent data foundation | core tested on host; reboot tests pending on image |
+| 0 | Architecture, repository, threat model, build system, CI | done |
+| 1 | Bootable x86_64 UEFI image | builds and boots in QEMU; physical hardware untested |
+| 2 | Persistent data foundation | reboot and power-loss tests pass in QEMU; encryption, updates and filesystem checks missing |
 | 3-13 | Desktop, security, automation, domains, widgets, apps, AI, server, installer/ISO, qualification | planned |
 
 ## Mandatory persistence acceptance tests (section 3.11)
 
 | # | Test | State |
 |---|---|---|
-| 1 | File survives reboot | automated in `tests/qemu/persistence_boot_test.py`; **not yet run** |
+| 1 | File survives reboot | **passed** in QEMU (run 43603109904) |
 | 2 | Theme survives reboot | blocked: no desktop |
 | 3 | Installed application survives reboot | blocked: no application manager |
-| 4 | Configuration change survives reboot | automated (CIDINT config store); **not yet run** |
+| 4 | Configuration change survives reboot | **passed** in QEMU for the CIDINT config store (run 43603109904) |
 | 5 | Database record survives database restart | blocked: no database integration |
 | 6 | Server restart keeps service data | blocked: no server edition |
 | 7 | Container volume survives restart | blocked |
@@ -94,6 +97,6 @@ iOS and legacy BlackBerry as host platforms.
 
 ## Production release gates (section 39)
 
-None of the twelve gates has passed. Gate 1 (bootability) and the first part
-of Gate 3 (persistence) are the targets of the next step: the first CI image
-build and QEMU run.
+None of the twelve gates has passed. Gate 1 (bootability) has QEMU evidence
+only and needs reference hardware; Gate 3 (persistence) has 2 of its 15
+acceptance tests passing.
