@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""cidint-software - the CIDINT OS software store.
+
+Lists the applications of the configured software source, installs and
+removes them (through cidint-authd) and starts installed ones. Every
+catalogue is signature-checked; an app that is installed runs as you."""
+import subprocess
+import sys
+
+sys.path.insert(0, "/usr/lib/cidint/desktop")
+import gi  # noqa: E402
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk  # noqa: E402
+
+from cidint_desktop import authclient, theme  # noqa: E402
+
+
+class Software(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Software")
+        self.set_default_size(860, 600)
+        self.connect("destroy", Gtk.main_quit)
+        hb = Gtk.HeaderBar(show_close_button=True)
+        hb.props.title = "Software"
+        self.set_titlebar(hb)
+        refresh = Gtk.Button(label="Refresh")
+        refresh.connect("clicked", lambda *_: self.request("store_refresh"))
+        hb.pack_end(refresh)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=18)
+        self.add(box)
+        box.pack_start(theme.label("Applications", "cidint-h1"), False, False, 0)
+        self.source = theme.label("", "cidint-muted", wrap=True)
+        box.pack_start(self.source, False, False, 0)
+        self.list = Gtk.ListBox()
+        self.list.set_selection_mode(Gtk.SelectionMode.NONE)
+        sc = Gtk.ScrolledWindow(vexpand=True)
+        sc.add(self.list)
+        box.pack_start(sc, True, True, 0)
+        self.status = theme.label("", "", wrap=True)
+        box.pack_start(self.status, False, False, 0)
+        box.pack_start(theme.label("Apps are checked against the signed catalogue before they are installed. "
+                                   "The signature shows who made an app; installed apps run with your "
+                                   "permissions.", "cidint-muted", wrap=True), False, False, 0)
+        self.show_all()
+        self.request("store_list")
+
+    def set_status(self, text, css=""):
+        ctx = self.status.get_style_context()
+        for c in ("cidint-ok", "cidint-error"):
+            ctx.remove_class(c)
+        if css:
+            ctx.add_class(css)
+        self.status.set_text(text)
+
+    def request(self, op, **kw):
+        self.set_status({"store_list": "Loading…", "store_refresh": "Checking the software source…",
+                         "store_install": "Installing…", "store_remove": "Removing…"}[op])
+        self.set_sensitive(False)
+
+        def done(res, err):
+            self.set_sensitive(True)
+            if err:
+                self.set_status(str(err).capitalize() + ".", "cidint-error")
+                return
+            self.set_status({"store_list": "", "store_refresh": "Catalogue verified.",
+                             "store_install": "Installed. It is also on the panel after your next login.",
+                             "store_remove": "Removed."}[op], "cidint-ok")
+            self.show_apps(res)
+
+        theme.run_async(lambda: authclient.request(op, timeout=600, **kw), done)
+
+    def show_apps(self, res):
+        src = res.get("source") or ""
+        self.source.set_text(f"Software source: {src}" if src else
+                             "No software source is set. An administrator sets one with "
+                             "'cidint-store source ADDRESS' (a web address or a folder, e.g. on a USB stick).")
+        for c in self.list.get_children():
+            self.list.remove(c)
+        apps = res.get("apps", [])
+        if not apps:
+            row = Gtk.ListBoxRow()
+            row.add(theme.label("  No applications listed yet. Press Refresh.", "cidint-muted"))
+            self.list.add(row)
+        for a in apps:
+            row = Gtk.Box(spacing=14, margin=10)
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            text.pack_start(theme.label(f"{a.get('name', a['id'])}  {a.get('version', '')}", "cidint-h1"),
+                            False, False, 0)
+            text.pack_start(theme.label(a.get("summary", ""), "", wrap=True), False, False, 0)
+            text.pack_start(theme.label(f"{a.get('license', '')}  ·  {int(a.get('size', 0)) // 1024} KB"
+                                        + (f"  ·  installed {a['installed']}" if a["installed"] else ""),
+                                        "cidint-muted"), False, False, 0)
+            row.pack_start(text, True, True, 0)
+            if a["installed"]:
+                run = Gtk.Button(label="Open")
+                run.get_style_context().add_class("suggested-action")
+                run.connect("clicked", lambda _b, i=a["id"]: subprocess.Popen(
+                    [f"/data/apps/store/{i}/" + self.exec_of(i)]))
+                rm = Gtk.Button(label="Remove")
+                rm.get_style_context().add_class("destructive-action")
+                rm.connect("clicked", lambda _b, i=a["id"]: self.request("store_remove", id=i))
+                row.pack_end(rm, False, False, 0)
+                row.pack_end(run, False, False, 0)
+                if a.get("version") and a["installed"] != a["version"] and a.get("file"):
+                    up = Gtk.Button(label="Update")
+                    up.connect("clicked", lambda _b, i=a["id"]: self.request("store_install", id=i))
+                    row.pack_end(up, False, False, 0)
+            else:
+                inst = Gtk.Button(label="Install")
+                inst.get_style_context().add_class("suggested-action")
+                inst.connect("clicked", lambda _b, i=a["id"]: self.request("store_install", id=i))
+                row.pack_end(inst, False, False, 0)
+            self.list.add(row)
+        self.list.show_all()
+
+    @staticmethod
+    def exec_of(app_id: str) -> str:
+        import json
+        try:
+            with open(f"/data/apps/store/{app_id}/app.json", encoding="utf-8") as f:
+                return json.load(f).get("exec", "")
+        except (OSError, ValueError):
+            return ""
+
+
+def main() -> int:
+    theme.apply()
+    Software()
+    Gtk.main()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

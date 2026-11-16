@@ -1,15 +1,49 @@
 #!/bin/sh
-# Run as the session user before the compositor starts: standard folders
-# and this session's Weston configuration (with the user's background).
+# Run as the session user before the compositor starts: standard folders,
+# and this session's Weston configuration (background, renderer, store apps).
 set -eu
 : "${XDG_RUNTIME_DIR:?}" "${HOME:?}"
-for d in Documents Downloads Pictures .config/cidint; do
+for d in Documents Downloads Pictures Music Videos .config/cidint; do
     mkdir -p "$HOME/$d"
 done
+CONF="$XDG_RUNTIME_DIR/weston.ini"
+
+# Renderer: OpenGL (hardware accelerated through Mesa) when the graphics
+# card has a driver Mesa accelerates; otherwise software (pixman).
+# ~/.config/cidint/renderer may say auto, gl or pixman.
+CHOICE=$(cat "$HOME/.config/cidint/renderer" 2>/dev/null || echo auto)
+DRIVER=""
+for c in /sys/class/drm/card*/device/driver; do
+    [ -e "$c" ] || continue
+    d=$(basename "$(readlink -f "$c")")
+    case "$d" in i915|xe|amdgpu|radeon|nouveau|vmwgfx) DRIVER=$d; break ;; esac
+done
+case "$CHOICE" in
+    gl) RENDERER=gl; WHY="OpenGL (chosen in Settings${DRIVER:+, driver $DRIVER})" ;;
+    pixman) RENDERER=pixman; WHY="software (chosen in Settings)" ;;
+    *) if [ -n "$DRIVER" ]; then RENDERER=gl; WHY="OpenGL, hardware accelerated (driver $DRIVER)";
+       else RENDERER=pixman; WHY="software (no accelerated graphics driver loaded)"; fi ;;
+esac
+echo "$WHY" > "$XDG_RUNTIME_DIR/cidint-renderer"
+
 BG=image
 grep -qx 'background=plain' "$HOME/.config/cidint/appearance" 2>/dev/null && BG=plain
+sed -e "s/^renderer=.*/renderer=$RENDERER/" /etc/cidint/weston.ini > "$CONF"
 if [ "$BG" = plain ]; then
-    sed -e '/^background-image=/d' -e '/^background-type=/d' /etc/cidint/weston.ini > "$XDG_RUNTIME_DIR/weston.ini"
-else
-    cp /etc/cidint/weston.ini "$XDG_RUNTIME_DIR/weston.ini"
+    sed -i -e '/^background-image=/d' -e '/^background-type=/d' "$CONF"
+fi
+
+# Programs installed from the Software store get a panel launcher.
+for app in /data/apps/store/*/app.ini; do
+    [ -f "$app" ] || continue
+    printf '\n[launcher]\n' >> "$CONF"
+    grep -E '^(icon|path)=' "$app" >> "$CONF"
+done
+
+# Sound: unmuted at a moderate volume the first time.
+if [ ! -e "$HOME/.config/cidint/sound-initialised" ] && command -v amixer >/dev/null 2>&1; then
+    for ctl in Master PCM Speaker Headphone; do
+        amixer -q sset "$ctl" 70% unmute 2>/dev/null || true
+    done
+    touch "$HOME/.config/cidint/sound-initialised"
 fi

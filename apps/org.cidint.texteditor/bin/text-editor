@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Text Editor for CIDINT OS: open, edit and save plain-text files."""
+import os
+import sys
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk  # noqa: E402
+
+
+class Editor(Gtk.Window):
+    def __init__(self, path):
+        super().__init__(title="Text Editor")
+        self.set_default_size(820, 600)
+        self.connect("delete-event", self.on_close)
+        self.path = ""
+        hb = Gtk.HeaderBar(show_close_button=True)
+        self.hb = hb
+        self.set_titlebar(hb)
+        for text, cb in (("Open", self.on_open), ("Save", self.on_save), ("Save as", self.on_save_as)):
+            b = Gtk.Button(label=text)
+            b.connect("clicked", cb)
+            hb.pack_start(b)
+        self.view = Gtk.TextView(monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR)
+        self.view.set_left_margin(10)
+        self.buf = self.view.get_buffer()
+        self.buf.connect("modified-changed", lambda *_: self.update_title())
+        sc = Gtk.ScrolledWindow()
+        sc.add(self.view)
+        self.add(sc)
+        self.show_all()
+        if path:
+            self.load(path)
+        self.update_title()
+
+    def update_title(self):
+        name = os.path.basename(self.path) if self.path else "Untitled"
+        self.hb.props.title = ("• " if self.buf.get_modified() else "") + name
+        self.hb.props.subtitle = os.path.dirname(self.path) if self.path else ""
+
+    def ask_path(self, title, default):
+        d = Gtk.Dialog(title=title, transient_for=self, modal=True)
+        d.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "OK", Gtk.ResponseType.OK)
+        d.set_default_response(Gtk.ResponseType.OK)
+        e = Gtk.Entry(text=default, activates_default=True, width_chars=50)
+        d.get_content_area().add(Gtk.Label(label="File path:"))
+        d.get_content_area().add(e)
+        d.show_all()
+        ok = d.run() == Gtk.ResponseType.OK
+        text = os.path.expanduser(e.get_text().strip())
+        d.destroy()
+        return text if ok and text else ""
+
+    def message(self, text):
+        d = Gtk.MessageDialog(transient_for=self, modal=True, buttons=Gtk.ButtonsType.CLOSE, text=text)
+        d.run()
+        d.destroy()
+
+    def load(self, path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                self.buf.set_text(f.read())
+        except FileNotFoundError:
+            self.buf.set_text("")
+        except (OSError, UnicodeDecodeError) as e:
+            return self.message(f"Cannot open {path}: {e}")
+        self.path = os.path.abspath(path)
+        self.buf.set_modified(False)
+        self.update_title()
+
+    def on_open(self, *_):
+        p = self.ask_path("Open", os.path.expanduser("~/Documents/"))
+        if p:
+            self.load(p)
+
+    def write(self, path):
+        text = self.buf.get_text(self.buf.get_start_iter(), self.buf.get_end_iter(), True)
+        tmp = path + ".saving"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+        except OSError as e:
+            return self.message(f"Cannot save {path}: {e}")
+        self.path = os.path.abspath(path)
+        self.buf.set_modified(False)
+        self.update_title()
+
+    def on_save(self, *_):
+        if self.path:
+            self.write(self.path)
+        else:
+            self.on_save_as()
+
+    def on_save_as(self, *_):
+        p = self.ask_path("Save as", self.path or os.path.expanduser("~/Documents/untitled.txt"))
+        if p:
+            self.write(p)
+
+    def on_close(self, *_):
+        if self.buf.get_modified():
+            d = Gtk.MessageDialog(transient_for=self, modal=True, buttons=Gtk.ButtonsType.YES_NO,
+                                  text="Close without saving your changes?")
+            ok = d.run() == Gtk.ResponseType.YES
+            d.destroy()
+            if not ok:
+                return True
+        Gtk.main_quit()
+        return False
+
+
+Editor(sys.argv[1] if len(sys.argv) > 1 else "")
+Gtk.main()

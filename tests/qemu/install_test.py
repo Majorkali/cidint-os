@@ -27,7 +27,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from persistence_boot_test import TEST_ROOT_PASSWORD, Vm  # noqa: E402
 
-DISK_BYTES = 4 * 1024**3 + 64 * 1024**2
+DISK_BYTES = 8 * 1024**3 + 64 * 1024**2
 
 
 def main() -> int:

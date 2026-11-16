@@ -30,7 +30,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from persistence_boot_test import Vm, system_state  # noqa: E402
+from persistence_boot_test import Vm, sparse_copy, system_state  # noqa: E402
 
 GUEST_PORT = 5555
 
@@ -58,7 +58,7 @@ def main() -> int:
     args.workdir.mkdir(parents=True, exist_ok=True)
     disk = args.workdir / "disk.wic"
     nvram = args.workdir / "OVMF_VARS.fd"
-    shutil.copyfile(args.image, disk)
+    sparse_copy(args.image, disk)
     shutil.copyfile(args.ovmf_vars, nvram)
 
     results = []

@@ -6,8 +6,8 @@
 # with legacy BIOS:
 #   5 bios-boot      1 MiB   GRUB core for legacy BIOS (first on the disk)
 #   1 esp          128 MiB   boot loader and kernel
-#   2 system-a    1024 MiB   read-only system image
-#   3 system-b    1024 MiB   reserved for A/B updates (left empty)
+#   2 system-a    2560 MiB   read-only system image
+#   3 system-b    2560 MiB   reserved for A/B updates (left empty)
 #   4 cidint-data  the rest  /data: everything that must survive
 #
 # THIS ERASES THE TARGET DISK. Safety rules, all enforced below:
@@ -29,7 +29,7 @@ set -eu
 
 PROG=cidint-install
 WORK=/run/cidint-install
-MIN_BYTES=4294967296   # 4 GiB
+MIN_BYTES=8589934592   # 8 GiB
 
 TARGET=""
 CONFIRM=""
@@ -126,7 +126,7 @@ NAME=$(basename "$TARGET")
 [ "$(cat "/sys/block/$NAME/size")" != "0" ] || refuse "$TARGET has no medium"
 
 BYTES=$(disk_bytes "$NAME")
-[ "$BYTES" -ge "$MIN_BYTES" ] || refuse "$TARGET is $(( BYTES / 1048576 )) MiB; at least 4096 MiB is required"
+[ "$BYTES" -ge "$MIN_BYTES" ] || refuse "$TARGET is $(( BYTES / 1048576 )) MiB; at least 8192 MiB is required"
 
 if grep -q "^/dev/$NAME[p0-9]* " /proc/mounts; then
     refuse "$TARGET or one of its partitions is mounted"
@@ -163,7 +163,7 @@ case "$SRC_DEV" in
 esac
 
 IMG_BYTES=$(stat -c %s "$SRC/rootfs.img")
-[ "$IMG_BYTES" -le 1073741824 ] || fail "system image is $IMG_BYTES bytes; it does not fit the 1024 MiB system slot"
+[ "$IMG_BYTES" -le 2684354560 ] || fail "system image is $IMG_BYTES bytes; it does not fit the 2560 MiB system slot"
 
 # Does the disk already hold something?
 HAS_CONTENT=0
@@ -198,7 +198,7 @@ if [ "$HAS_CONTENT" -eq 1 ] && [ "$ERASE_EXISTING" -ne 1 ]; then
     refuse "$TARGET already contains a partition table or filesystem. Back up anything you need, then repeat with --erase-existing"
 fi
 
-DATA_MIB=$(( BYTES / 1048576 - 2 - 128 - 1024 - 1024 - 2 ))
+DATA_MIB=$(( BYTES / 1048576 - 2 - 128 - 2560 - 2560 - 2 ))
 
 # Secrets are checked before anything is erased.
 first_line() { IFS= read -r _l < "$1" || true; printf '%s' "$_l"; }
@@ -231,8 +231,8 @@ else
 fi
 echo "  5 bios-boot      1 MiB  GRUB for legacy BIOS"
 echo "  1 esp          128 MiB  FAT32"
-echo "  2 system-a    1024 MiB  system image, mounted read-only"
-echo "  3 system-b    1024 MiB  empty, reserved for updates"
+echo "  2 system-a    2560 MiB  system image, mounted read-only"
+echo "  3 system-b    2560 MiB  empty, reserved for updates"
 if [ "$ENCRYPT" -eq 1 ]; then
     echo "  4 cidint-data ${DATA_MIB} MiB  LUKS2 (passphrase at every start), ext4 inside, /data"
 else
@@ -321,8 +321,8 @@ say "partitioning $TARGET"
 sfdisk --wipe always --wipe-partitions always "$TARGET" <<EOF
 label: gpt
 ${P}1 : start=4096, size=128MiB, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="esp"
-${P}2 : size=1024MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="system-a"
-${P}3 : size=1024MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="system-b"
+${P}2 : size=2560MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="system-a"
+${P}3 : size=2560MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="system-b"
 ${P}4 : type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="cidint-data"
 ${P}5 : start=2048, size=2048, type=21686148-6449-6E6F-744E-656564454649, name="bios-boot"
 EOF

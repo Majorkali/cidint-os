@@ -26,6 +26,7 @@ target:
 
 env:
   CIDINT_UPDATE_PUBKEY: ""
+  CIDINT_APPS_PUBKEY: ""
 
 repos:
   # This repository (the directory containing kas/).

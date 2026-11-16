@@ -1,0 +1,9 @@
+{
+  "id": "org.cidint.texteditor",
+  "name": "Text Editor",
+  "version": "1.0.0",
+  "summary": "Open, edit and save plain-text files.",
+  "license": "Apache-2.0",
+  "exec": "bin/text-editor",
+  "author": "CIDINT OS Project"
+}

@@ -8,7 +8,7 @@ inherit core-image
 IMAGE_FEATURES += "read-only-rootfs"
 
 IMAGE_INSTALL = "\
-    packagegroup-core-boot \
+    packagegroup-core-boot     kernel-modules     linux-firmware-rtl-nic     linux-firmware-rtl8168 \
     e2fsprogs-e2fsck \
     cidint-cli \
     cidint-storage \
@@ -28,6 +28,6 @@ WKS_FILE = "cidint-ab.wks.in"
 WKS_FILE_DEPENDS:append = " e2fsprogs-native"
 IMAGE_ROOTFS_EXTRA_SPACE = "0"
 # The system is read-only, so its file system needs little free space; the
-# image must fit a 1024 MiB system slot, and the build stops if it does not.
+# image must fit a 2560 MiB system slot, and the build stops if it does not.
 IMAGE_OVERHEAD_FACTOR = "1.15"
-IMAGE_ROOTFS_MAXSIZE = "1048576"
+IMAGE_ROOTFS_MAXSIZE = "2621440"

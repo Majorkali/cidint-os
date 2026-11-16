@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""System Monitor for CIDINT OS: processor and memory use, and the
+running processes, read from /proc every two seconds."""
+import os
+import sys
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import GLib, Gtk  # noqa: E402
+
+
+def cpu_times():
+    with open("/proc/stat") as f:
+        v = [int(x) for x in f.readline().split()[1:]]
+    idle = v[3] + (v[4] if len(v) > 4 else 0)
+    return sum(v), idle
+
+
+def meminfo():
+    m = {}
+    with open("/proc/meminfo") as f:
+        for line in f:
+            k, v = line.split(":", 1)
+            m[k] = int(v.split()[0])
+    return m["MemTotal"], m["MemTotal"] - m.get("MemAvailable", m["MemFree"])
+
+
+def processes():
+    out = []
+    page = os.sysconf("SC_PAGE_SIZE") // 1024
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                stat = f.read()
+            name = stat[stat.index("(") + 1:stat.rindex(")")]
+            fields = stat[stat.rindex(")") + 2:].split()
+            rss = int(fields[21]) * page
+            with open(f"/proc/{pid}/status") as f:
+                uid = next(int(line.split()[1]) for line in f if line.startswith("Uid:"))
+            out.append((int(pid), name, rss, uid))
+        except (OSError, ValueError, StopIteration, IndexError):
+            continue
+    return sorted(out, key=lambda p: -p[2])
+
+
+class Monitor(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="System Monitor")
+        self.set_default_size(640, 560)
+        self.connect("destroy", Gtk.main_quit)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin=12)
+        self.add(box)
+        self.cpu = Gtk.LevelBar()
+        self.mem = Gtk.LevelBar()
+        self.cpu_l, self.mem_l = Gtk.Label(xalign=0), Gtk.Label(xalign=0)
+        for lab, bar in ((self.cpu_l, self.cpu), (self.mem_l, self.mem)):
+            box.pack_start(lab, False, False, 0)
+            box.pack_start(bar, False, False, 0)
+        self.store = Gtk.ListStore(int, str, str, str)
+        view = Gtk.TreeView(model=self.store)
+        for i, t in enumerate(("PID", "Name", "Memory", "User")):
+            view.append_column(Gtk.TreeViewColumn(t, Gtk.CellRendererText(), text=i))
+        sc = Gtk.ScrolledWindow(vexpand=True)
+        sc.add(view)
+        box.pack_start(sc, True, True, 0)
+        self.last = cpu_times()
+        self.update()
+        GLib.timeout_add_seconds(2, self.update)
+        self.show_all()
+
+    def update(self):
+        import pwd
+        total, idle = cpu_times()
+        dt, di = total - self.last[0], idle - self.last[1]
+        self.last = (total, idle)
+        use = 0.0 if dt <= 0 else max(0.0, 1 - di / dt)
+        self.cpu.set_value(use)
+        self.cpu_l.set_text(f"Processor: {use * 100:.0f}% ({os.cpu_count()} CPUs)")
+        t, u = meminfo()
+        self.mem.set_value(u / t)
+        self.mem_l.set_text(f"Memory: {u / 1048576:.2f} of {t / 1048576:.2f} GiB in use")
+        self.store.clear()
+        for pid, name, rss, uid in processes()[:200]:
+            try:
+                user = pwd.getpwuid(uid).pw_name
+            except KeyError:
+                user = str(uid)
+            self.store.append([pid, name, f"{rss / 1024:.1f} MB", user])
+        return True
+
+
+if len(sys.argv) > 1 and sys.argv[1] == "--once":
+    t, u = meminfo()
+    print(f"memory_used_kb={u} processes={len(processes())}")
+    sys.exit(0)
+Monitor()
+Gtk.main()

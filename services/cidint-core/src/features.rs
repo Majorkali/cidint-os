@@ -134,6 +134,36 @@ pub const FEATURES: &[Feature] = &[
         "written with QEMU checks (keyboard login, apps on screen, password change, logout)",
     ),
     f(
+        "desktop",
+        "Web browser (WebKitGTK): tabs, private tabs, search",
+        Untested,
+        "QEMU check written (local test page over the network); no web-compatibility testing",
+    ),
+    f(
+        "desktop",
+        "Sound (ALSA) and media player (GStreamer; Ogg, WebM, FLAC, MP3, WAV)",
+        Untested,
+        "QEMU checks written (virtual HDA card recorded on the host); no H.264/AAC (patent licences)",
+    ),
+    f(
+        "desktop",
+        "Wi-Fi (iwd) with Settings page and cidint-wifi",
+        Untested,
+        "QEMU check written with simulated radios (WPA2, DHCP, saved network); no real Wi-Fi chip tested",
+    ),
+    f(
+        "desktop",
+        "Software store: signed catalogue and app bundles, Software app",
+        Untested,
+        "unit tests pass; QEMU check written; three apps by the project; no public repository yet",
+    ),
+    f(
+        "desktop",
+        "Hardware-accelerated graphics (Mesa: Intel, AMD, NVIDIA nouveau, virgl)",
+        Untested,
+        "drivers and firmware included; QEMU has no GPU, so only the OpenGL path with software OpenGL is checked",
+    ),
+    f(
         "security",
         "Root password set at installation",
         Tested,

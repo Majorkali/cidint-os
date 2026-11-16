@@ -4,6 +4,7 @@
 Browse folders, create folders, rename, copy, cut and paste, move to the
 trash, restore from the trash, empty it, and read text files."""
 import os
+import subprocess
 import sys
 import time
 
@@ -19,6 +20,8 @@ from cidint_desktop import fileops, theme  # noqa: E402
 HOME = os.path.expanduser("~")
 TRASH = "trash://"
 ICONS = "/usr/share/cidint/icons"
+MEDIA = (".ogg", ".oga", ".ogv", ".opus", ".flac", ".mp3", ".wav", ".webm", ".mkv", ".mka")
+IMAGES = (".png", ".jpg", ".jpeg", ".gif")
 
 
 class Files(Gtk.Window):
@@ -182,10 +185,28 @@ class Files(Gtk.Window):
         if row[5]:
             if self.cwd != TRASH:
                 self.open(row[4])
+        elif row[4].lower().endswith(MEDIA):
+            subprocess.Popen(["cidint-media", row[4]])
+        elif row[4].lower().endswith(IMAGES):
+            self.show_image(row[4])
+        elif row[4].lower().endswith((".html", ".htm")):
+            subprocess.Popen(["cidint-browser", "file://" + row[4]])
         elif fileops.is_text(row[4]):
             self.show_text(row[4])
         else:
             self.error(f"No program in CIDINT OS can open '{os.path.basename(row[4])}' yet.")
+
+    def show_image(self, path: str):
+        try:
+            pix = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, 1200, 800, True)
+        except Exception as e:  # unreadable or unsupported image
+            return self.error(f"Cannot show this image: {e}")
+        win = Gtk.Window(title=os.path.basename(path), transient_for=self)
+        sc = Gtk.ScrolledWindow()
+        sc.add(Gtk.Image.new_from_pixbuf(pix))
+        win.add(sc)
+        win.set_default_size(min(1200, pix.get_width() + 20), min(800, pix.get_height() + 20))
+        win.show_all()
 
     def on_key(self, _w, ev):
         ctrl = ev.state & Gdk.ModifierType.CONTROL_MASK

@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Calculator for CIDINT OS. Expressions are evaluated by a small parser
+(numbers, + - * / % ^, parentheses), never by Python's eval."""
+import ast
+import operator
+import sys
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk  # noqa: E402
+
+OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
+       ast.Mod: operator.mod, ast.Pow: operator.pow, ast.USub: operator.neg, ast.UAdd: operator.pos}
+
+
+def calc(expr: str) -> float:
+    def ev(n):
+        if isinstance(n, ast.Expression):
+            return ev(n.body)
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)):
+            return n.value
+        if isinstance(n, ast.BinOp) and type(n.op) in OPS:
+            a, b = ev(n.left), ev(n.right)
+            if isinstance(n.op, ast.Pow) and abs(b) > 1000:
+                raise ValueError("exponent too large")
+            return OPS[type(n.op)](a, b)
+        if isinstance(n, ast.UnaryOp) and type(n.op) in OPS:
+            return OPS[type(n.op)](ev(n.operand))
+        raise ValueError("not a calculation")
+    return ev(ast.parse(expr.replace("^", "**").replace("×", "*").replace("÷", "/"), mode="eval"))
+
+
+def fmt(v) -> str:
+    if isinstance(v, float) and v.is_integer() and abs(v) < 1e15:
+        return str(int(v))
+    return f"{v:.12g}"
+
+
+class Calculator(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Calculator")
+        self.connect("destroy", Gtk.main_quit)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin=12)
+        self.add(box)
+        self.entry = Gtk.Entry(xalign=1)
+        self.entry.connect("activate", self.equals)
+        self.result = Gtk.Label(xalign=1)
+        box.pack_start(self.entry, False, False, 0)
+        box.pack_start(self.result, False, False, 0)
+        grid = Gtk.Grid(row_spacing=6, column_spacing=6, row_homogeneous=True, column_homogeneous=True)
+        keys = ["7", "8", "9", "÷", "C", "4", "5", "6", "×", "(", "1", "2", "3", "-", ")",
+                "0", ".", "%", "+", "="]
+        for i, k in enumerate(keys):
+            b = Gtk.Button(label=k)
+            b.set_size_request(56, 44)
+            b.connect("clicked", self.press, k)
+            grid.attach(b, i % 5, i // 5, 1, 1)
+        box.pack_start(grid, True, True, 0)
+        self.show_all()
+
+    def press(self, _b, k):
+        if k == "C":
+            self.entry.set_text("")
+            self.result.set_text("")
+        elif k == "=":
+            self.equals()
+        else:
+            self.entry.insert_text(k, self.entry.get_position())
+            self.entry.set_position(self.entry.get_position() + len(k))
+
+    def equals(self, *_):
+        try:
+            self.result.set_text("= " + fmt(calc(self.entry.get_text())))
+        except ZeroDivisionError:
+            self.result.set_text("cannot divide by zero")
+        except (ValueError, SyntaxError, OverflowError, TypeError):
+            self.result.set_text("not a valid calculation")
+
+
+if len(sys.argv) > 2 and sys.argv[1] == "--eval":
+    print(fmt(calc(sys.argv[2])))
+    sys.exit(0)
+Calculator()
+Gtk.main()

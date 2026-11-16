@@ -1,0 +1,9 @@
+{
+  "id": "org.cidint.calculator",
+  "name": "Calculator",
+  "version": "1.0.0",
+  "summary": "Everyday arithmetic with brackets, percent and powers.",
+  "license": "Apache-2.0",
+  "exec": "bin/calculator",
+  "author": "CIDINT OS Project"
+}

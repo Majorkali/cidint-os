@@ -2,7 +2,7 @@
 """cidint-settings - CIDINT OS settings.
 
 Every page shows values read from the running system, and every control
-does what it says. Pages: About, Network, Security, Updates, AI,
+does what it says. Pages: About, Network, Wi-Fi, Sound, Display, Security, Updates, AI,
 Appearance, Account, Power."""
 import os
 import re
@@ -15,7 +15,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk  # noqa: E402
 
-from cidint_desktop import authclient, theme  # noqa: E402
+from cidint_desktop import authclient, settings_hw, theme  # noqa: E402
 
 APPEARANCE = os.path.expanduser("~/.config/cidint/appearance")
 
@@ -250,6 +250,9 @@ class Settings(Gtk.Window):
         self.set_titlebar(hb)
         stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
         for name, title, make in (("about", "About", about_page), ("network", "Network", network_page),
+                                  ("wifi", "Wi-Fi", lambda: settings_hw.wifi_page(page, grid)),
+                                  ("sound", "Sound", lambda: settings_hw.sound_page(page, grid)),
+                                  ("display", "Display", lambda: settings_hw.display_page(page, grid)),
                                   ("security", "Security", security_page), ("updates", "Updates", updates_page),
                                   ("ai", "AI engine", ai_page), ("appearance", "Appearance", appearance_page),
                                   ("account", "Account", account_page), ("power", "Power", power_page)):

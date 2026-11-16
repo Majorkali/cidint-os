@@ -36,6 +36,23 @@ TEST_ROOT_PASSWORD = "cidint-test-root-9"
 SHELL_PROMPT = r"root@[\w.-]+:[^\r\n]*# "
 
 
+def sparse_copy(src: Path, dst: Path, block: int = 1 << 20):
+    """Copy a disk image without writing its empty (all-zero) blocks, so a
+    mostly empty multi-GB image costs little space on the test machine."""
+    zero = bytes(block)
+    size = os.path.getsize(src)
+    with open(src, "rb") as fi, open(dst, "wb") as fo:
+        while True:
+            chunk = fi.read(block)
+            if not chunk:
+                break
+            if chunk == zero[:len(chunk)]:
+                fo.seek(len(chunk), os.SEEK_CUR)
+            else:
+                fo.write(chunk)
+        fo.truncate(size)
+
+
 class Vm:
     def __init__(self, image: Path, code: Path | None, nvram: Path | None, log, cdrom: bool = False,
                  extra_disk: Path | None = None, passphrase: str | None = None,
@@ -219,7 +236,7 @@ def main() -> int:
     args.workdir.mkdir(parents=True, exist_ok=True)
     disk = args.workdir / "disk.wic"
     nvram = args.workdir / "OVMF_VARS.fd"
-    shutil.copyfile(args.image, disk)
+    sparse_copy(args.image, disk)
     shutil.copyfile(args.ovmf_vars, nvram)
 
     results = []

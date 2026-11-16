@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""cidint-browser - the CIDINT OS web browser (WebKitGTK).
+
+    cidint-browser [URL]
+
+Tabs, address bar (an address or words to search for), back, forward,
+reload, zoom, and private tabs that keep no history, cookies or cache.
+Web content runs in WebKit's separate web-content processes. There is no
+extension support and no saved passwords."""
+import os
+import sys
+import urllib.parse
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("WebKit", "6.0")
+from gi.repository import Gdk, Gio, Gtk, WebKit  # noqa: E402
+
+HOME_PAGE = "file:///usr/share/cidint/browser/start.html"
+SEARCH = "https://duckduckgo.com/html/?q="
+DATA = os.path.expanduser("~/.local/share/cidint-browser")
+CACHE = os.path.expanduser("~/.cache/cidint-browser")
+
+CSS = """
+window { background-color: #0b1626; color: #e6eef7; }
+headerbar { background-color: #0e1d31; color: #e6eef7; }
+entry { background-color: #0f2238; color: #e6eef7; border: 1px solid #24476a; border-radius: 8px; }
+entry:focus-within { border-color: #2bd4e0; }
+button { background-color: #163150; color: #e6eef7; border-radius: 8px; }
+notebook > header { background-color: #0a1626; }
+notebook > header tab:checked { background-color: #163a5c; }
+.private { color: #c9a6ff; }
+"""
+
+
+def to_url(text: str) -> str:
+    text = text.strip()
+    if not text:
+        return HOME_PAGE
+    if "://" in text or text.startswith(("about:", "file:")):
+        return text
+    if " " not in text and "." in text:
+        return "https://" + text
+    return SEARCH + urllib.parse.quote_plus(text)
+
+
+class Browser(Gtk.ApplicationWindow):
+    def __init__(self, app, first_url: str):
+        super().__init__(application=app, title="Browser")
+        self.set_default_size(1100, 720)
+        os.makedirs(DATA, exist_ok=True)
+        os.makedirs(CACHE, exist_ok=True)
+        self.normal = WebKit.NetworkSession.new(DATA, CACHE)
+        self.private = WebKit.NetworkSession.new_ephemeral()
+        for s in (self.normal, self.private):
+            s.get_cookie_manager().set_accept_policy(WebKit.CookieAcceptPolicy.NO_THIRD_PARTY)
+
+        hb = Gtk.HeaderBar()
+        self.set_titlebar(hb)
+        self.back = Gtk.Button(label="‹")
+        self.fwd = Gtk.Button(label="›")
+        reload_ = Gtk.Button(label="⟳")
+        for b, cb in ((self.back, lambda *_: self.view().go_back()), (self.fwd, lambda *_: self.view().go_forward()),
+                      (reload_, lambda *_: self.view().reload())):
+            b.connect("clicked", cb)
+            hb.pack_start(b)
+        self.entry = Gtk.Entry(hexpand=True, placeholder_text="Search or enter an address")
+        self.entry.connect("activate", lambda e: self.view().load_uri(to_url(e.get_text())))
+        hb.set_title_widget(self.entry)
+        new = Gtk.Button(label="+ Tab")
+        new.connect("clicked", lambda *_: self.new_tab(HOME_PAGE))
+        priv = Gtk.Button(label="Private tab")
+        priv.connect("clicked", lambda *_: self.new_tab(HOME_PAGE, private=True))
+        hb.pack_end(priv)
+        hb.pack_end(new)
+
+        self.tabs = Gtk.Notebook(scrollable=True)
+        self.tabs.connect("switch-page", lambda nb, page, n: self.sync(page))
+        self.set_child(self.tabs)
+
+        keys = Gtk.ShortcutController()
+        for accel, fn in (("<Control>t", lambda *_: self.new_tab(HOME_PAGE)),
+                          ("<Control>w", lambda *_: self.close_tab(self.view())),
+                          ("<Control>l", lambda *_: self.entry.grab_focus()),
+                          ("<Control>plus", lambda *_: self.zoom(0.1)),
+                          ("<Control>minus", lambda *_: self.zoom(-0.1)),
+                          ("F5", lambda *_: self.view().reload())):
+            keys.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(accel),
+                                               Gtk.CallbackAction.new(lambda *a, fn=fn: (fn(), True)[1])))
+        self.add_controller(keys)
+        self.new_tab(first_url)
+
+    def view(self) -> WebKit.WebView:
+        return self.tabs.get_nth_page(self.tabs.get_current_page())
+
+    def new_tab(self, url: str, private: bool = False):
+        view = WebKit.WebView(network_session=self.private if private else self.normal)
+        settings = view.get_settings()
+        settings.set_enable_developer_extras(False)
+        settings.set_hardware_acceleration_policy(WebKit.HardwareAccelerationPolicy.NEVER
+                                                  if os.environ.get("CIDINT_BROWSER_SOFTWARE") else
+                                                  WebKit.HardwareAccelerationPolicy.ALWAYS)
+        view.private = private
+        title = Gtk.Box(spacing=4)
+        label = Gtk.Label(label="Private" if private else "New tab", max_width_chars=22)
+        label.set_ellipsize(3)
+        if private:
+            label.add_css_class("private")
+        close = Gtk.Button(label="×")
+        close.set_has_frame(False)
+        close.connect("clicked", lambda *_: self.close_tab(view))
+        title.append(label)
+        title.append(close)
+        view.connect("notify::title", lambda v, _p: label.set_text(("Private · " if private else "")
+                                                                     + (v.get_title() or "Untitled")))
+        view.connect("notify::uri", lambda v, _p: self.sync(v))
+        view.connect("load-changed", self.on_load)
+        view.connect("create", lambda v, action: self.new_tab_from(action, private))
+        n = self.tabs.append_page(view, title)
+        self.tabs.set_tab_reorderable(view, True)
+        self.tabs.set_current_page(n)
+        view.load_uri(url)
+        return view
+
+    def new_tab_from(self, action, private):
+        req = action.get_request()
+        v = self.new_tab(req.get_uri() if req else HOME_PAGE, private)
+        return v
+
+    def close_tab(self, view):
+        n = self.tabs.page_num(view)
+        if n >= 0:
+            self.tabs.remove_page(n)
+        if self.tabs.get_n_pages() == 0:
+            self.close()
+
+    def zoom(self, d):
+        v = self.view()
+        v.set_zoom_level(max(0.3, min(3.0, v.get_zoom_level() + d)))
+
+    def sync(self, view):
+        if view is None or view is not self.view():
+            return
+        uri = view.get_uri() or ""
+        self.entry.set_text("" if uri == HOME_PAGE else uri)
+        self.back.set_sensitive(view.can_go_back())
+        self.fwd.set_sensitive(view.can_go_forward())
+
+    def on_load(self, view, event):
+        if event == WebKit.LoadEvent.FINISHED:
+            self.sync(view)
+            # One line per finished page, for the system log and the tests.
+            print(f"cidint-browser: loaded {view.get_uri()} title={view.get_title()!r}", flush=True)
+
+
+class App(Gtk.Application):
+    def __init__(self, url):
+        super().__init__(application_id="org.cidint.Browser", flags=Gio.ApplicationFlags.NON_UNIQUE)
+        self.url = url
+
+    def do_activate(self):
+        provider = Gtk.CssProvider()
+        try:
+            provider.load_from_string(CSS)
+        except AttributeError:  # GTK before 4.12
+            provider.load_from_data(CSS, -1)
+        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider,
+                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        Gtk.Settings.get_default().set_property("gtk-application-prefer-dark-theme", True)
+        Browser(self, self.url).present()
+
+
+def main() -> int:
+    url = to_url(sys.argv[1]) if len(sys.argv) > 1 else HOME_PAGE
+    return App(url).run([sys.argv[0]])
+
+
+if __name__ == "__main__":
+    sys.exit(main())

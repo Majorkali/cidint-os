@@ -35,7 +35,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from persistence_boot_test import TEST_ROOT_PASSWORD, Vm, system_state  # noqa: E402
+from persistence_boot_test import TEST_ROOT_PASSWORD, Vm, sparse_copy, system_state  # noqa: E402
 
 SAMPLES = json.loads((HERE / "wallpaper-samples.json").read_text())["points"]
 
@@ -114,7 +114,7 @@ def main() -> int:
     disk = work / "disk.wic"
     nvram = work / "OVMF_VARS.fd"
     if not args.cdrom:
-        shutil.copyfile(args.image, disk)
+        sparse_copy(args.image, disk)
     shutil.copyfile(args.ovmf_vars, nvram)
     qmp_path = f"/tmp/cidint-desktop-qmp-{os.getpid()}.sock"
     live = args.cdrom
@@ -258,7 +258,9 @@ def main() -> int:
             env = (f"XDG_RUNTIME_DIR={run_dir} WAYLAND_DISPLAY={sock} HOME=/home/{user} USER={user} "
                    "GDK_BACKEND=wayland")
             for app, args_, label in (("weston-terminal", "", "Terminal"), ("cidint-files", f"/home/{user}", "Files"),
-                                      ("cidint-settings", "", "Settings"), ("cidint-assistant", "", "Assistant")):
+                                      ("cidint-settings", "", "Settings"), ("cidint-assistant", "", "Assistant"),
+                                      ("cidint-browser", "", "Browser (start page)"), ("cidint-media", "", "Media"),
+                                      ("cidint-software", "", "Software")):
                 vm.run(as_user(f"{env} {app} {args_} >/tmp/{app}.log 2>&1 &"))
                 diff, shot = 0.0, base
                 for _ in range(12):

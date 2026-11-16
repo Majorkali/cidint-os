@@ -9,6 +9,8 @@
   cidint-authctl logout
   cidint-authctl power reboot|poweroff
   cidint-authctl ask "QUESTION"      ask the local AI engine
+  cidint-authctl store-list | store-refresh | store-install ID | store-remove ID
+                                     software store (desktop users)
 
 Exit codes: 0 ok, 1 refused or failed, 2 usage."""
 import json
@@ -36,6 +38,15 @@ def main(argv) -> int:
             r = authclient.request("logout")
         elif op == "power" and len(args) == 1:
             r = authclient.request("power", action=args[0])
+        elif op in ("store-list", "store-refresh") and not args:
+            r = authclient.request(op.replace("-", "_"), timeout=600)
+            for a in r.get("apps", []):
+                print(f"{a['id']} {a.get('version', '')} installed={a.get('installed') or '-'}")
+            return 0
+        elif op in ("store-install", "store-remove") and len(args) == 1:
+            r = authclient.request(op.replace("-", "_"), timeout=600, id=args[0])
+            print("ok")
+            return 0
         elif op == "ask" and len(args) == 1:
             r = authclient.request("ai_chat", timeout=660, question=args[0])
             print(r.get("answer", ""))

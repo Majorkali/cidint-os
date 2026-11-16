@@ -28,7 +28,7 @@ PROG=cidint-slot
 ENVFILE=/boot/EFI/BOOT/grubenv
 HOLD=/data/config/cidint/hold-update-confirm
 WORK=/run/cidint-slot
-SLOT_BYTES=1073741824
+SLOT_BYTES=2684354560
 KEYS=/usr/share/cidint/keys/update
 
 say()    { echo "$PROG: $*"; }
@@ -101,7 +101,7 @@ verify_update() {
     done
     ( cd "$DIR" && sha256sum -c update.sha256 >/dev/null 2>&1 ) || bad "checksum mismatch"
     say "checksums match"
-    [ "$(stat -c %s "$DIR/rootfs.img")" -le "$SLOT_BYTES" ] || refuse "the system image does not fit a 1024 MiB slot"
+    [ "$(stat -c %s "$DIR/rootfs.img")" -le "$SLOT_BYTES" ] || refuse "the system image does not fit a 2560 MiB slot"
 }
 
 cmd_verify() {

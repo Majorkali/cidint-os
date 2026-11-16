@@ -89,19 +89,26 @@ jobs:
           scripts/ci-run.sh "pip install kas" "$HOME/kas-venv/bin/pip" install kas==4.8.2
           scripts/ci-run.sh "kas --version" "$HOME/kas-venv/bin/kas" --version
           ls -l /usr/share/OVMF/
-      - name: Development update-signing key (this run only)
-        # A throwaway Ed25519 key: its public half is built into the images,
-        # the private half stays in the runner's temporary directory, is used
-        # by the update test and is never uploaded. Updates from this run can
-        # only be applied to images from this run. Not a release key.
+      - name: Development signing keys (this run only) and the signed app repository
+        # Throwaway Ed25519 keys, one for system updates and one for the
+        # software store: their public halves are built into the images, the
+        # private halves stay in the runner's temporary directory and are
+        # never uploaded. Updates and app catalogues from this run only fit
+        # images from this run. Not release keys.
         run: |
           set -euo pipefail
           umask 077
-          mkdir -p "$RUNNER_TEMP/update-key"
-          openssl genpkey -algorithm ed25519 -out "$RUNNER_TEMP/update-key/dev.key"
-          openssl pkey -in "$RUNNER_TEMP/update-key/dev.key" -pubout -out "$RUNNER_TEMP/update-key/dev.pub"
+          for k in update-key apps-key; do
+            mkdir -p "$RUNNER_TEMP/$k"
+            openssl genpkey -algorithm ed25519 -out "$RUNNER_TEMP/$k/dev.key"
+            openssl pkey -in "$RUNNER_TEMP/$k/dev.key" -pubout -out "$RUNNER_TEMP/$k/dev.pub"
+          done
           echo "CIDINT_UPDATE_PUBKEY=$(sed -n 2p "$RUNNER_TEMP/update-key/dev.pub")" >> "$GITHUB_ENV"
-          echo "::notice title=Update key::development key for this run: $(sed -n 2p "$RUNNER_TEMP/update-key/dev.pub")"
+          echo "CIDINT_APPS_PUBKEY=$(sed -n 2p "$RUNNER_TEMP/apps-key/dev.pub")" >> "$GITHUB_ENV"
+          echo "::notice title=Keys::update $(sed -n 2p "$RUNNER_TEMP/update-key/dev.pub") apps $(sed -n 2p "$RUNNER_TEMP/apps-key/dev.pub")"
+          umask 022
+          python3 scripts/build-app-repo.py --key "$RUNNER_TEMP/apps-key/dev.key" --out artifacts/app-repo
+          cp "$RUNNER_TEMP/apps-key/dev.pub" artifacts/app-repo/store-key-DEVELOPMENT.pub
       - name: Restore build caches
         uses: actions/cache/restore@v4
         with:
@@ -255,6 +262,14 @@ jobs:
             artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-live-x86_64.iso \
             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: Desktop apps - sound, media player, browser, software store, OpenGL (QEMU, UEFI)
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        run: |
+          scripts/ci-run.sh "QEMU desktop apps test" python3 tests/qemu/desktop_apps_test.py             artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-x86_64.wic             --app-repo artifacts/app-repo             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: Wi-Fi with simulated radios, WPA2 access point, DHCP, saved network (QEMU, UEFI)
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        run: |
+          scripts/ci-run.sh "QEMU Wi-Fi test" python3 tests/qemu/wifi_test.py             artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-x86_64.wic             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
       - name: AI engine, included model, sandbox, chat and inference (QEMU, UEFI)
         if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
         run: |
@@ -304,6 +319,12 @@ jobs:
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
           echo "::notice title=SHA256SUMS::$(tr '\n' ';' < SHA256SUMS)"
+      - name: Upload the signed app repository
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cidint-apps-repo
+          path: artifacts/app-repo/
       - name: Upload images
         if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
         uses: actions/upload-artifact@v4

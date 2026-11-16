@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""cidint-media - the CIDINT OS media player (GStreamer).
+
+    cidint-media [FILE]
+
+Plays audio and video files. Formats: Ogg (Vorbis, Opus, Theora), WebM and
+Matroska with VP8/VP9, FLAC, MP3, WAV. Formats that need patent licences
+(H.264, H.265, AAC) are not included; such files show an error instead of
+playing. Without FILE, lists the files in ~/Music and ~/Videos."""
+import os
+import sys
+
+sys.path.insert(0, "/usr/lib/cidint/desktop")
+import gi  # noqa: E402
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gst", "1.0")
+from gi.repository import GLib, Gst, Gtk  # noqa: E402
+
+from cidint_desktop import theme  # noqa: E402
+
+MEDIA_EXT = (".ogg", ".oga", ".ogv", ".opus", ".flac", ".mp3", ".wav", ".webm", ".mkv", ".mka")
+
+
+def fmt(ns: int) -> str:
+    s = max(0, ns // Gst.SECOND)
+    return f"{s // 60}:{s % 60:02d}"
+
+
+class Player(Gtk.Window):
+    def __init__(self, path: str):
+        super().__init__(title="Media")
+        self.set_default_size(900, 600)
+        self.connect("destroy", self.quit)
+        hb = Gtk.HeaderBar(show_close_button=True)
+        hb.props.title = "Media"
+        self.set_titlebar(hb)
+        self.hb = hb
+
+        self.play = Gst.ElementFactory.make("playbin", "player")
+        sink = Gst.ElementFactory.make("gtksink", "video")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.add(box)
+        self.stack = Gtk.Stack()
+        box.pack_start(self.stack, True, True, 0)
+        if sink is not None:
+            self.play.set_property("video-sink", sink)
+            self.stack.add_named(sink.props.widget, "video")
+        self.library = Gtk.ListBox()
+        self.library.connect("row-activated", lambda _b, row: self.open(row.path))
+        sc = Gtk.ScrolledWindow()
+        sc.add(self.library)
+        self.stack.add_named(sc, "library")
+
+        controls = Gtk.Box(spacing=8, margin=10)
+        self.toggle = Gtk.Button(label="Play")
+        self.toggle.get_style_context().add_class("suggested-action")
+        self.toggle.connect("clicked", self.on_toggle)
+        stop = Gtk.Button(label="Stop")
+        stop.connect("clicked", lambda *_: self.stop())
+        lib = Gtk.Button(label="Library")
+        lib.connect("clicked", lambda *_: self.show_library())
+        self.pos = theme.label("0:00", "cidint-muted")
+        self.scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 1, 1)
+        self.scale.set_draw_value(False)
+        self.scale.connect("change-value", self.on_seek)
+        self.dur = theme.label("0:00", "cidint-muted")
+        vol = Gtk.VolumeButton()
+        vol.set_value(1.0)
+        vol.connect("value-changed", lambda _b, v: self.play.set_property("volume", v))
+        for w, expand in ((lib, False), (self.toggle, False), (stop, False), (self.pos, False),
+                          (self.scale, True), (self.dur, False), (vol, False)):
+            controls.pack_start(w, expand, expand, 0)
+        box.pack_start(controls, False, False, 0)
+        self.status = theme.label("", "cidint-error", wrap=True)
+        self.status.set_margin_start(12)
+        self.status.set_margin_bottom(8)
+        box.pack_start(self.status, False, False, 0)
+
+        bus = self.play.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message::eos", lambda *_: self.stop())
+        bus.connect("message::error", self.on_error)
+        GLib.timeout_add(500, self.tick)
+        self.show_all()
+        if path:
+            self.open(path)
+        else:
+            self.show_library()
+
+    def show_library(self):
+        for c in self.library.get_children():
+            self.library.remove(c)
+        found = 0
+        for folder in ("Music", "Videos", "Downloads"):
+            d = os.path.expanduser("~/" + folder)
+            if not os.path.isdir(d):
+                continue
+            for name in sorted(os.listdir(d)):
+                if name.lower().endswith(MEDIA_EXT):
+                    row = Gtk.ListBoxRow()
+                    row.add(theme.label(f"  {folder} / {name}"))
+                    row.path = os.path.join(d, name)
+                    self.library.add(row)
+                    found += 1
+        if not found:
+            row = Gtk.ListBoxRow()
+            row.add(theme.label("  No media files in Music, Videos or Downloads.", "cidint-muted"))
+            row.path = ""
+            self.library.add(row)
+        self.library.show_all()
+        self.stack.set_visible_child_name("library")
+
+    def open(self, path: str):
+        if not path:
+            return
+        self.play.set_state(Gst.State.NULL)
+        self.status.set_text("")
+        self.play.set_property("uri", Gst.filename_to_uri(os.path.abspath(path)))
+        self.hb.props.subtitle = os.path.basename(path)
+        if self.stack.get_child_by_name("video"):
+            self.stack.set_visible_child_name("video")
+        self.play.set_state(Gst.State.PLAYING)
+        self.toggle.set_label("Pause")
+
+    def on_toggle(self, *_):
+        _, state, _ = self.play.get_state(0)
+        if state == Gst.State.PLAYING:
+            self.play.set_state(Gst.State.PAUSED)
+            self.toggle.set_label("Play")
+        elif self.play.get_property("current-uri"):
+            self.play.set_state(Gst.State.PLAYING)
+            self.toggle.set_label("Pause")
+
+    def stop(self):
+        self.play.set_state(Gst.State.READY)
+        self.toggle.set_label("Play")
+        self.scale.set_value(0)
+        self.pos.set_text("0:00")
+
+    def on_seek(self, _scale, _scroll, value):
+        self.play.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT, int(value * Gst.SECOND))
+        return False
+
+    def on_error(self, _bus, msg):
+        err, _dbg = msg.parse_error()
+        text = err.message
+        if "codec" in text.lower() or "decoder" in text.lower() or "missing" in text.lower():
+            text += " - this format is not supported in CIDINT OS (it needs a patent-licensed codec)."
+        self.status.set_text(text)
+        print(f"cidint-media: error: {err.message}", file=sys.stderr, flush=True)
+        self.stop()
+
+    def tick(self):
+        ok_d, dur = self.play.query_duration(Gst.Format.TIME)
+        ok_p, pos = self.play.query_position(Gst.Format.TIME)
+        if ok_d and dur > 0:
+            self.scale.set_range(0, dur / Gst.SECOND)
+            self.dur.set_text(fmt(dur))
+        if ok_p:
+            self.scale.set_value(pos / Gst.SECOND)
+            self.pos.set_text(fmt(pos))
+        return True
+
+    def quit(self, *_):
+        self.play.set_state(Gst.State.NULL)
+        Gtk.main_quit()
+
+
+def main() -> int:
+    Gst.init(None)
+    theme.apply()
+    Player(sys.argv[1] if len(sys.argv) > 1 else "")
+    Gtk.main()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

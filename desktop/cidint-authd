@@ -14,6 +14,8 @@ caller is identified by the kernel (SO_PEERCRED), never by what it says.
   ai_chat  {question}         answer from the local AI engine (sandboxed,
                               no network); from the session user
   status   {}                 which user's session is running
+  store_*  {id}               software store: list, refresh, install,
+                              remove (signed apps); desktop users
 
 Failed logins are slowed down (2 s, growing to 10 s). Passwords are never
 logged. Exit codes: 0 stopped, 1 failure.
@@ -44,6 +46,7 @@ _crypt.crypt.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
 shadow_lock = threading.Lock()
 ai_lock = threading.Lock()
 fail_lock = threading.Lock()
+store_lock = threading.Lock()
 failures = 0
 
 
@@ -227,6 +230,25 @@ def handle(req: dict, uid: int) -> dict:
         if r.returncode != 0:
             return {"ok": False, "error": (r.stderr.strip() or "the engine failed")[-300:]}
         return {"ok": True, "answer": r.stdout.strip()}
+
+    if op in ("store_list", "store_refresh", "store_install", "store_remove"):
+        if caller not in desktop_users():
+            return {"ok": False, "error": "only desktop users can use the software store"}
+        sys.path.insert(0, "/usr/lib/cidint/desktop")
+        from cidint_desktop import store
+        try:
+            with store_lock:
+                if op == "store_refresh":
+                    store.refresh()
+                elif op == "store_install":
+                    meta = store.install(str(req.get("id", "")))
+                    log(f"store: {caller} installed {meta.get('id')} {meta.get('version')}")
+                elif op == "store_remove":
+                    store.remove(str(req.get("id", "")))
+                    log(f"store: {caller} removed {req.get('id')}")
+                return {"ok": True, "source": store.source(), "apps": store.catalogue()}
+        except store.StoreError as e:
+            return {"ok": False, "error": str(e)}
 
     return {"ok": False, "error": "unknown request"}
 
