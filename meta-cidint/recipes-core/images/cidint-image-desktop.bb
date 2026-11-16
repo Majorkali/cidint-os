@@ -4,7 +4,7 @@ SUMMARY = "CIDINT OS Desktop Edition (preview): graphical Wayland session"
 DESCRIPTION = "The base system plus a graphical session that starts at \
 boot."
 
-IMAGE_INSTALL:append = " cidint-desktop ${CIDINT_DESKTOP_FIRMWARE}"
+IMAGE_INSTALL:append = " cidint-desktop ${CIDINT_DESKTOP_FIRMWARE} bluez5-noinst-tools pciutils usbutils"
 
 # Decoders for patent-encumbered formats (H.264, H.265, AAC): only when the
 # build is made with kas/codecs-patented.yml, which explains the licensing.

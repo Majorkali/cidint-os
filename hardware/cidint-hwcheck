@@ -109,6 +109,10 @@ report() {
     ls /proc/asound/card*/id >/dev/null 2>&1 && for c in /proc/asound/card*/id; do echo "sound card      : $(cat "$c")"; done || echo "sound card      : none detected"
     grep -h '^N: Name=' /proc/bus/input/devices 2>/dev/null | sed 's/^N: Name=/input device    : /'
 
+    section "Drivers (cidint-drivers)"
+    if command -v cidint-drivers >/dev/null 2>&1; then cidint-drivers list 2>&1; fi
+    echo "CPU microcode   : $(sed -n 's/^microcode[[:space:]]*: //p' /proc/cpuinfo | head -n 1)"
+
     section "Bluetooth"
     found_bt=0
     for h in /sys/class/bluetooth/hci*; do

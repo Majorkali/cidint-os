@@ -82,3 +82,22 @@ legacy BIOS.
 A hardware result counts only with the report file and the notes above.
 It goes into [TESTING.md](TESTING.md) with the computer's model; nothing
 is claimed for other models.
+
+## When something does not work
+
+Run `cidint-drivers list` as root. It names every device without a driver,
+says whether this kernel has a module for it, and lists firmware files that
+drivers asked for and did not find.
+
+- "kernel module available, not bound": run `cidint-drivers load`.
+- Missing firmware: copy the files from the
+  [linux-firmware](https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git)
+  project (or the device maker) to a USB stick, keeping their folders, then
+  run `cidint-drivers firmware add /path/to/stick`. They are kept on the data
+  volume and used at every start. `cidint-drivers firmware remove` undoes it.
+  Only add firmware from a source you trust; it runs inside the device.
+- "no driver in this kernel": the device needs a kernel driver CIDINT OS does
+  not build yet. Include the hardware report in a bug report.
+
+`cidint-soundcheck --play`, `cidint-gpucheck` and `cidint-bluetooth scan`
+check sound, graphics acceleration and Bluetooth on their own.

@@ -3,4 +3,4 @@
 # (built in, available before any module loads), plus drivers for common
 # PC graphics, sound, Wi-Fi and network hardware (modules).
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
-SRC_URI += "file://cidint-security.cfg file://cidint-hardware.cfg"
+SRC_URI += "file://cidint-security.cfg file://cidint-hardware.cfg file://cidint-hardware-pc.cfg"

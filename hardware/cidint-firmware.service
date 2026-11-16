@@ -1,0 +1,13 @@
+[Unit]
+Description=Use firmware added with cidint-drivers (from /data/firmware)
+Documentation=man:cidint-drivers
+RequiresMountsFor=/data
+After=systemd-udev-trigger.service local-fs.target
+ConditionDirectoryNotEmpty=/data/firmware
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/cidint-drivers boot
+
+[Install]
+WantedBy=multi-user.target

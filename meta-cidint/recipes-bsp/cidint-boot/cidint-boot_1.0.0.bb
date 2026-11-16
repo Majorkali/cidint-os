@@ -6,14 +6,31 @@ refuses a kernel or boot menu without a valid detached signature \
 (check_signatures=enforce). The firmware checks GRUB, GRUB checks the rest. \
 The same files are installed under /usr/share/cidint/boot so that the \
 installer and system updates use exactly what was signed."
-LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+# CPU microcode (processor bug and security fixes from Intel and AMD) is
+# loaded by GRUB as an early initrd, before the kernel starts.
+LICENSE = "Apache-2.0 & Intel-Microcode & Firmware-amd-ucode"
+NO_GENERIC_LICENSE[Intel-Microcode] = "git/license"
+NO_GENERIC_LICENSE[Firmware-amd-ucode] = "LICENSE.amd-ucode"
+LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10                     file://git/license;md5=d8405101ec6e90c1d84b082b0c40c721                     file://LICENSE.amd-ucode;md5=6ca90c57f7b248de1e25c7f68ffc4698"
+
+# Intel: release microcode-20260925. AMD: linux-firmware 20240909.
+SRC_URI = "git://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files.git;protocol=https;branch=main;name=intel"
+SRCREV_intel = "bdc92abe5c499c3fd7988b76a128d05c9120a520"
+BB_GIT_SHALLOW = "1"
+AMD_UCODE_URI = "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain"
+SRC_URI += "    ${AMD_UCODE_URI}/LICENSE.amd-ucode?h=20240909;downloadfilename=LICENSE.amd-ucode;name=amdlic     ${AMD_UCODE_URI}/amd-ucode/microcode_amd.bin?h=20240909;downloadfilename=microcode_amd.bin;name=amd     ${AMD_UCODE_URI}/amd-ucode/microcode_amd_fam15h.bin?h=20240909;downloadfilename=microcode_amd_fam15h.bin;name=amd15     ${AMD_UCODE_URI}/amd-ucode/microcode_amd_fam16h.bin?h=20240909;downloadfilename=microcode_amd_fam16h.bin;name=amd16     ${AMD_UCODE_URI}/amd-ucode/microcode_amd_fam17h.bin?h=20240909;downloadfilename=microcode_amd_fam17h.bin;name=amd17     ${AMD_UCODE_URI}/amd-ucode/microcode_amd_fam19h.bin?h=20240909;downloadfilename=microcode_amd_fam19h.bin;name=amd19 "
+SRC_URI[amdlic.sha256sum] = "27907ae1d74b94fd6f1159971158ed3199e472f129ea1ff748ea13aded2a59d5"
+SRC_URI[amd.sha256sum] = "8a9d9e8b788e31e61cddc03cb1eeab5db99e0f667128943ff0780e6437d2e43e"
+SRC_URI[amd15.sha256sum] = "9d4a668410e72a4bdb86dc23e4261eca04daa83456ada02504115223f356981a"
+SRC_URI[amd16.sha256sum] = "e02ad653b39c975d6c52674b50f23727bb6706bab7b4e5b391a4ce229e7ff121"
+SRC_URI[amd17.sha256sum] = "b3f324891c224f00436b4efdcac248da1b82603694f25b6a096f6a0c590dcaf9"
+SRC_URI[amd19.sha256sum] = "2ffd1f89faa306bcaacff9b55ee781dd715590394d63beb8d1741801911dcc73"
 
 inherit deploy
 
 COMPATIBLE_HOST = "x86_64.*-linux"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
-DEPENDS = "grub-native grub-efi"
+DEPENDS = "grub-native grub-efi cpio-native"
 do_compile[depends] += "virtual/kernel:do_deploy"
 
 # Directory holding the boot keys of this build (never part of the
@@ -109,19 +126,27 @@ set timeout=3
 
 menuentry 'CIDINT OS (system slot A)' --id a {
     linux /bzImage-a root=PARTUUID=$cidint_uuid_a @ARGS@ cidint.slot=a $cidint_extra
+    if [ -f /microcode-a.img ]; then initrd /microcode-a.img; fi
 }
 menuentry 'CIDINT OS (system slot B)' --id b {
     linux /bzImage-b root=PARTUUID=$cidint_uuid_b @ARGS@ cidint.slot=b $cidint_extra
+    if [ -f /microcode-b.img ]; then initrd /microcode-b.img; fi
 }
 EOF
     sed -i "s|@ARGS@|${CIDINT_BOOT_ARGS}|" ${B}/out/grub.cfg
 
     cp -L ${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGETYPE} ${B}/out/bzImage
+
+    # Early microcode archive: the kernel applies it before anything runs.
+    rm -rf ${B}/ucode && install -d ${B}/ucode/kernel/x86/microcode
+    cat ${WORKDIR}/git/intel-ucode/* > ${B}/ucode/kernel/x86/microcode/GenuineIntel.bin
+    cat ${WORKDIR}/microcode_amd*.bin > ${B}/ucode/kernel/x86/microcode/AuthenticAMD.bin
+    ( cd ${B}/ucode && find kernel | LC_ALL=C sort | cpio --quiet -o -H newc --reproducible ) > ${B}/out/microcode.img
     grub-editenv ${B}/out/grubenv create
     grub-editenv ${B}/out/grubenv set slot=a
 
     if [ -n "$KEYS" ]; then
-        for f in grub.cfg bzImage; do
+        for f in grub.cfg bzImage microcode.img; do
             gpg --homedir "$KEYS/gnupg" --batch --yes --pinentry-mode loopback --passphrase '' \
                 --digest-algo SHA512 --detach-sign -o ${B}/out/$f.sig ${B}/out/$f \
                 || bbfatal "could not sign $f with the GPG boot key"
@@ -141,7 +166,7 @@ do_install() {
     for f in grub.cfg grub.cfg.sig grubenv; do
         [ ! -f ${B}/out/$f ] || install -m 0644 ${B}/out/$f ${D}${datadir}/cidint/boot/EFI/BOOT/$f
     done
-    for f in bzImage bzImage.sig cidint-db.cer; do
+    for f in bzImage bzImage.sig microcode.img microcode.img.sig cidint-db.cer; do
         [ ! -f ${B}/out/$f ] || install -m 0644 ${B}/out/$f ${D}${datadir}/cidint/boot/$f
     done
 }

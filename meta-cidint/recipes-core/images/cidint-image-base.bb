@@ -37,7 +37,8 @@ IMAGE_BOOT_FILES = "\
     cidint-boot/grub.cfg;EFI/BOOT/grub.cfg \
     cidint-boot/grubenv;EFI/BOOT/grubenv \
     cidint-boot/bzImage;bzImage-a \
-    ${@'cidint-boot/grub.cfg.sig;EFI/BOOT/grub.cfg.sig cidint-boot/bzImage.sig;bzImage-a.sig cidint-boot/cidint-db.cer;EFI/cidint/cidint-db.cer' if d.getVar('CIDINT_BOOT_SIGNED') else ''} \
+    cidint-boot/microcode.img;microcode-a.img \
+    ${@'cidint-boot/grub.cfg.sig;EFI/BOOT/grub.cfg.sig cidint-boot/bzImage.sig;bzImage-a.sig cidint-boot/microcode.img.sig;microcode-a.img.sigcidint-boot/cidint-db.cer;EFI/cidint/cidint-db.cer' if d.getVar('CIDINT_BOOT_SIGNED') else ''} \
 "
 do_image_wic[depends] += "cidint-boot:do_deploy"
 IMAGE_ROOTFS_EXTRA_SPACE = "0"

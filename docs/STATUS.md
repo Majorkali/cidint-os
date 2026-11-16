@@ -65,7 +65,9 @@ it. Nothing has run on physical hardware.
   keys; release keys come from `scripts/make-keys.sh`. Enrolling keys on a
   real PC is done in its firmware setup ([SECURE-BOOT.md](SECURE-BOOT.md))
 - Bluetooth (BlueZ, Settings page, `cidint-bluetooth`) and Bluetooth audio
-  through PipeWire: no test, because QEMU has no Bluetooth radio
+  through PipeWire. QEMU has no Bluetooth radio; the test uses two virtual
+  controllers (BlueZ's btvirt) to search, pair and forget. Real adapters and
+  audio over Bluetooth are not tested
 - Decoders for H.264, H.265 and AAC: only in builds made with
   `kas/codecs-patented.yml` (patent licences are the builder's decision);
   never built by CI
@@ -86,6 +88,14 @@ Written with QEMU tests that have not yet run in CI:
 - Drivers and firmware for common Wi-Fi (Intel, Qualcomm/Atheros, Broadcom,
   Marvell, Realtek, MediaTek), Bluetooth and sound chips, including Sound Open
   Firmware for Intel laptop audio DSPs. Only real hardware can show which work
+- More PC and laptop drivers: touchpads and touch screens (I2C HID), laptop
+  hotkeys and battery (ThinkPad, Dell, HP, ASUS, Lenovo, Acer, MSI, Surface),
+  SD card readers, NVMe behind Intel VMD, USB-C, Thunderbolt/USB4, webcams,
+  SoundWire audio, more network cards, Intel Xe graphics
+- CPU microcode updates (Intel and AMD), loaded by GRUB before the kernel and
+  signed with the boot files. QEMU guests cannot load microcode
+- `cidint-drivers`: lists devices without a driver, loads modules the kernel
+  has for them, and adds firmware from a USB stick to `/data/firmware`
 - Software catalogue publishing (workflow "Publish apps", GitHub release
   `apps`) and software sources on USB sticks or folders. Publishing needs the
   maintainer's release key and has not been run

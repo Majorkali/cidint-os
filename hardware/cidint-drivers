@@ -1,0 +1,148 @@
+#!/bin/sh
+# cidint-drivers - find and fix devices that have no driver.
+#
+#   cidint-drivers list              devices without a driver: whether this
+#                                    kernel has a module for them, and the
+#                                    firmware files drivers asked for and did
+#                                    not find
+#   cidint-drivers load              (root) load the modules the kernel has
+#                                    for those devices and probe them again
+#   cidint-drivers firmware add DIR  (root) copy firmware files from DIR (for
+#                                    example a USB stick holding a newer
+#                                    linux-firmware tree) to /data/firmware,
+#                                    where the kernel also looks; then probe
+#   cidint-drivers firmware list     firmware added this way
+#   cidint-drivers firmware remove   (root) remove all added firmware
+#
+# The system partition is read-only; added firmware lives on the data
+# volume and is used from the next probe or start on. Firmware runs inside
+# the device: only add files from a source you trust (the linux-firmware
+# project or the device maker). Exit codes: 0 ok, 1 failure, 2 usage,
+# 6 not root.
+set -u
+EXTRA=/data/firmware
+PARAM=/sys/module/firmware_class/parameters/path
+
+need_root() { [ "$(id -u)" -eq 0 ] || { echo "cidint-drivers: must be run as root" >&2; exit 6; }; }
+
+unbound() {
+    for d in /sys/bus/pci/devices/* /sys/bus/usb/devices/*:*; do
+        [ -e "$d/modalias" ] || continue
+        [ -e "$d/driver" ] && continue
+        echo "$d"
+    done
+}
+
+describe() {
+    d=$1
+    case "$d" in
+        /sys/bus/pci/*) printf 'pci %s %s:%s class %s' "$(basename "$d")" "$(sed 's/0x//' "$d/vendor")" \
+            "$(sed 's/0x//' "$d/device")" "$(sed 's/0x//' "$d/class")" ;;
+        *) printf 'usb %s interface class %s' "$(basename "$d")" "$(cat "$d/bInterfaceClass" 2>/dev/null)" ;;
+    esac
+}
+
+missing_firmware() {
+    dmesg 2>/dev/null | sed -n 's/.*[Dd]irect firmware load for \([^ ]*\) failed.*/\1/p;
+                                s/.*firmware: failed to load \([^ ]*\) .*/\1/p' | sort -u
+}
+
+set_path() {
+    [ -w "$PARAM" ] && [ -d "$EXTRA" ] && printf '%s' "$EXTRA" > "$PARAM"
+}
+
+reprobe() {
+    for d in $(unbound); do
+        alias=$(cat "$d/modalias")
+        modprobe -q "$alias" 2>/dev/null || true
+        case "$d" in
+            /sys/bus/pci/*) echo "$(basename "$d")" > /sys/bus/pci/drivers_probe 2>/dev/null || true ;;
+            *) echo "$(basename "$d")" > /sys/bus/usb/drivers_probe 2>/dev/null || true ;;
+        esac
+    done
+    # Drivers that bound but failed on missing firmware: reload them.
+    for fw in $(missing_firmware); do
+        [ -f "$EXTRA/$fw" ] || [ -f "$EXTRA/$fw.xz" ] || [ -f "$EXTRA/$fw.zst" ] || continue
+        for m in $(dmesg | grep -F "$fw" | sed -n 's/^\[[^]]*\] \([a-z0-9_]*\)[ :].*/\1/p' | sort -u); do
+            [ -d "/sys/module/$m" ] || continue
+            echo "reloading $m (it asked for $fw)"
+            modprobe -r "$m" 2>/dev/null && modprobe "$m" 2>/dev/null || true
+        done
+    done
+}
+
+case "${1:-}" in
+list)
+    n=0
+    for d in $(unbound); do
+        n=$((n + 1))
+        alias=$(cat "$d/modalias")
+        mods=$(modprobe -R "$alias" 2>/dev/null | tr '\n' ' ')
+        echo "$(describe "$d")"
+        if [ -n "$mods" ]; then
+            echo "    kernel module available, not bound: $mods (try: cidint-drivers load)"
+        else
+            echo "    no driver in this kernel for $alias"
+        fi
+    done
+    [ $n -gt 0 ] || echo "every PCI and USB device has a driver"
+    fw=$(missing_firmware)
+    if [ -n "$fw" ]; then
+        echo
+        echo "firmware files drivers asked for and did not find:"
+        for f in $fw; do
+            if [ -f "$EXTRA/$f" ]; then echo "  $f (now added in $EXTRA; run: cidint-drivers load)"; else echo "  $f"; fi
+        done
+        echo "Get them from https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git"
+        echo "or the device maker, then: cidint-drivers firmware add DIR"
+    fi
+    ;;
+load)
+    need_root
+    set_path
+    reprobe
+    "$0" list
+    ;;
+firmware)
+    case "${2:-}" in
+    add)
+        need_root
+        [ $# -eq 3 ] && [ -d "$3" ] || { echo "Usage: cidint-drivers firmware add DIR" >&2; exit 2; }
+        mkdir -p "$EXTRA" && chmod 755 "$EXTRA" || exit 1
+        # Regular files only; no links, nothing outside DIR, never set-user-ID.
+        n=0
+        cd "$3" || exit 1
+        find . -type f -size -64M | while read -r f; do
+            f=${f#./}
+            case "$f" in *..*|.*) continue ;; esac
+            mkdir -p "$EXTRA/$(dirname "$f")"
+            if [ -e "$EXTRA/$f" ]; then
+                cmp -s "$f" "$EXTRA/$f" || echo "kept the existing $EXTRA/$f (differs; remove it first to replace)"
+                continue
+            fi
+            cp "$f" "$EXTRA/$f" && chmod 644 "$EXTRA/$f"
+        done
+        sync
+        echo "firmware files in $EXTRA: $(find "$EXTRA" -type f | wc -l)"
+        set_path
+        reprobe
+        ;;
+    list)
+        [ -d "$EXTRA" ] && (cd "$EXTRA" && find . -type f | sed 's|^\./||' | sort) || echo "no firmware added"
+        ;;
+    remove)
+        need_root
+        [ -d "$EXTRA" ] || { echo "no firmware added"; exit 0; }
+        rm -rf "$EXTRA" && sync && echo "removed $EXTRA; it takes effect at the next start"
+        ;;
+    *) echo "Usage: cidint-drivers firmware add DIR | list | remove" >&2; exit 2 ;;
+    esac
+    ;;
+boot)
+    # At start-up (cidint-firmware.service): use added firmware, probe again.
+    [ -d "$EXTRA" ] || exit 0
+    set_path
+    reprobe >/dev/null 2>&1
+    ;;
+*) sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+esac

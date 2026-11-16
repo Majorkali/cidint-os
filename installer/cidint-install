@@ -408,6 +408,9 @@ BOOTFILES=/usr/share/cidint/boot
 if [ -f "$BOOTFILES/EFI/BOOT/bootx64.efi" ] && [ -f "$BOOTFILES/EFI/BOOT/grub.cfg" ] && [ -f "$BOOTFILES/bzImage" ]; then
     cp "$BOOTFILES/EFI/BOOT/bootx64.efi" "$BOOTFILES/EFI/BOOT/grub.cfg" "$WORK/esp/EFI/BOOT/"
     cp "$BOOTFILES/bzImage" "$WORK/esp/bzImage-a"
+    # CPU microcode, loaded by GRUB before the kernel.
+    [ ! -f "$BOOTFILES/microcode.img" ] || cp "$BOOTFILES/microcode.img" "$WORK/esp/microcode-a.img"
+    [ ! -f "$BOOTFILES/microcode.img.sig" ] || cp "$BOOTFILES/microcode.img.sig" "$WORK/esp/microcode-a.img.sig"
     if [ -f "$BOOTFILES/EFI/BOOT/grub.cfg.sig" ] && [ -f "$BOOTFILES/bzImage.sig" ]; then
         cp "$BOOTFILES/EFI/BOOT/grub.cfg.sig" "$WORK/esp/EFI/BOOT/"
         cp "$BOOTFILES/bzImage.sig" "$WORK/esp/bzImage-a.sig"

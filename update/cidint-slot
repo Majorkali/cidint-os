@@ -156,6 +156,9 @@ cmd_install() {
     if [ -f "$NEWBOOT/bzImage" ]; then
         cp "$NEWBOOT/bzImage" "$WORK/kernel" || fail "could not read the kernel of the new system"
         KERNEL="$WORK/kernel"
+        for f in microcode.img microcode.img.sig; do
+            [ ! -f "$NEWBOOT/$f" ] || cp "$NEWBOOT/$f" "$WORK/$f" || fail "could not read $f of the new system"
+        done
         if [ -f "$NEWBOOT/bzImage.sig" ]; then
             cp "$NEWBOOT/bzImage.sig" "$WORK/kernel.sig" || fail "could not read the kernel signature"
             KSIG="$WORK/kernel.sig"
@@ -183,7 +186,11 @@ cmd_install() {
     else
         rm -f "/boot/bzImage-$NEW.sig"
     fi
-    rm -f "$WORK/kernel" "$WORK/kernel.sig"
+    # CPU microcode of the new system (a missing file is skipped at boot).
+    rm -f "/boot/microcode-$NEW.img" "/boot/microcode-$NEW.img.sig"
+    [ ! -f "$WORK/microcode.img" ] || cp "$WORK/microcode.img" "/boot/microcode-$NEW.img"
+    [ ! -f "$WORK/microcode.img.sig" ] || cp "$WORK/microcode.img.sig" "/boot/microcode-$NEW.img.sig"
+    rm -f "$WORK/kernel" "$WORK/kernel.sig" "$WORK/microcode.img" "$WORK/microcode.img.sig"
     sync
 
     grub-editenv "$ENVFILE" unset tried rolled_back

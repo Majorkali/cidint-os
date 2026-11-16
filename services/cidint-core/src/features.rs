@@ -287,7 +287,7 @@ pub const FEATURES: &[Feature] = &[
         "desktop",
         "Bluetooth (BlueZ): Settings page, cidint-bluetooth, Bluetooth audio",
         Experimental,
-        "no test: QEMU has no Bluetooth radio",
+        "QEMU test written with two virtual controllers (btvirt): search, pair, forget; no radio, no audio test",
     ),
     f(
         "desktop",
@@ -300,6 +300,24 @@ pub const FEATURES: &[Feature] = &[
         "Drivers and firmware for common Wi-Fi, Bluetooth and sound chips (incl. SOF)",
         Untested,
         "built into the Desktop Edition; only real hardware can show which work",
+    ),
+    f(
+        "hardware",
+        "Laptop and PC drivers: touchpads, card readers, NVMe/VMD, USB-C, Thunderbolt, webcams",
+        Untested,
+        "kernel modules built; never tried on a real laptop",
+    ),
+    f(
+        "hardware",
+        "CPU microcode (Intel 20260925, AMD linux-firmware 20240909), loaded by GRUB",
+        Untested,
+        "signed with the boot files; QEMU guests cannot load microcode, so not testable there",
+    ),
+    f(
+        "hardware",
+        "cidint-drivers: devices without a driver, load modules, firmware from a USB stick",
+        Untested,
+        "QEMU test written (report, firmware added and removed)",
     ),
     f(
         "apps",

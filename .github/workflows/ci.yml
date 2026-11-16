@@ -290,6 +290,13 @@ jobs:
           sudo modprobe vgem || echo "vgem is not available on this runner"
           sudo chmod 666 /dev/dri/renderD* 2>/dev/null || true
           scripts/ci-run.sh "QEMU GPU test" python3 tests/qemu/gpu_test.py             artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-x86_64.wic             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: Bluetooth with virtual controllers, pairing, driver tool (QEMU, UEFI)
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        run: |
+          scripts/ci-run.sh "QEMU Bluetooth test" python3 tests/qemu/bluetooth_test.py \
+            artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-x86_64.wic \
+            --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
       - name: Secure Boot with enrolled CIDINT keys, tampered kernel refused (QEMU, UEFI)
         if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
         run: |
