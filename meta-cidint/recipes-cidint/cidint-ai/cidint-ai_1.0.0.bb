@@ -1,6 +1,7 @@
 SUMMARY = "CIDINT local AI engine"
 DESCRIPTION = "cidint-ai runs a locally stored language model with llama.cpp \
-inside a sandbox without network access. No model is shipped."
+inside a sandbox without network access. The included model comes from \
+cidint-ai-model-smollm2."
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 

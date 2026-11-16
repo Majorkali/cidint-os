@@ -63,8 +63,9 @@ Usage: $PROG --list
                      asked for at every start; if it is lost, the data is lost.
   --passphrase-file F   read the passphrase from the first line of F
                      instead of asking (unattended installs)
-  --root-password-file F   set the root password of the installed system
-                     from the first line of F (asked for when interactive)
+  --root-password-file F   root password of the installed system, from the
+                     first line of F (required; asked for when interactive;
+                     at least 8 characters)
   --kernel-args ARGS extra kernel arguments for the installed system
 EOF
 }
@@ -232,14 +233,17 @@ if [ "$ENCRYPT" -eq 1 ]; then
     fi
     [ "${#PASSPHRASE}" -ge 8 ] || refuse "the passphrase must have at least 8 characters; nothing was changed"
 fi
+# A root password is required: the installed system has no other way in.
 ROOTPW=""
 if [ -n "$ROOTPW_FILE" ]; then
+    [ -r "$ROOTPW_FILE" ] || fail "cannot read $ROOTPW_FILE"
     ROOTPW=$(first_line "$ROOTPW_FILE")
-    [ -n "$ROOTPW" ] || refuse "$ROOTPW_FILE is empty; nothing was changed"
-elif [ "$INTERACTIVE" -eq 1 ]; then
-    echo "Set the root password of the installed system (empty: keep the development default, no password)."
+else
+    [ "$INTERACTIVE" -eq 1 ] || refuse "no root password given; use --root-password-file FILE"
+    echo "Choose the root password of the installed system (at least 8 characters)."
     ask_secret "Root password"; ROOTPW=$SECRET
 fi
+[ "${#ROOTPW}" -ge 8 ] || refuse "the root password must have at least 8 characters; nothing was changed"
 case "$ROOTPW" in *:*) refuse "the root password must not contain ':'; nothing was changed" ;; esac
 
 # ---- point of no return ---------------------------------------------------
@@ -321,16 +325,14 @@ else
 fi
 echo "PARTUUID=$UUID_ESP	/boot	vfat	defaults	0	0" >> "$WORK/root/etc/fstab"
 [ -z "$DATA_SPEC" ] || echo "$DATA_SPEC	/data	ext4	defaults	0	2" >> "$WORK/root/etc/fstab"
-if [ -n "$ROOTPW" ]; then
-    say "setting the root password"
-    HASH=$(printf '%s' "$ROOTPW" | openssl passwd -6 -stdin) || fail "could not hash the root password"
-    case "$HASH" in '$6$'*) ;; *) fail "unexpected password hash format" ;; esac
-    awk -F: -v OFS=: -v h="$HASH" '$1 == "root" { $2 = h } { print }' "$WORK/root/etc/shadow" > "$WORK/shadow.new" \
-        || fail "could not prepare the password file"
-    cat "$WORK/shadow.new" > "$WORK/root/etc/shadow"
-    rm -f "$WORK/shadow.new"
-    grep -q '^root:\$6\$' "$WORK/root/etc/shadow" || fail "the root password was not stored as a hash"
-fi
+say "setting the root password"
+HASH=$(printf '%s' "$ROOTPW" | openssl passwd -6 -stdin) || fail "could not hash the root password"
+case "$HASH" in '$6$'*) ;; *) fail "unexpected password hash format" ;; esac
+awk -F: -v OFS=: -v h="$HASH" '$1 == "root" { $2 = h } { print }' "$WORK/root/etc/shadow" > "$WORK/shadow.new" \
+    || fail "could not prepare the password file"
+cat "$WORK/shadow.new" > "$WORK/root/etc/shadow"
+rm -f "$WORK/shadow.new"
+grep -q '^root:\$6\$' "$WORK/root/etc/shadow" || fail "the root password was not stored as a hash"
 sync
 umount "$WORK/root"
 
@@ -393,4 +395,3 @@ if [ "$ENCRYPT" -eq 1 ]; then
 else
     say "the data volume is NOT encrypted (--encrypt-data was not given)."
 fi
-[ -n "$ROOTPW" ] || say "WARNING: root has no password on the installed system."

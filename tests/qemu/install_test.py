@@ -25,7 +25,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from persistence_boot_test import Vm  # noqa: E402
+from persistence_boot_test import TEST_ROOT_PASSWORD, Vm  # noqa: E402
 
 DISK_BYTES = 4 * 1024**3 + 64 * 1024**2
 
@@ -41,13 +41,13 @@ def main() -> int:
     args = ap.parse_args()
     # Throwaway test secrets for a disposable virtual disk.
     passphrase = "cidint test passphrase 7"
-    root_password = "cidint-test-root-9"
+    root_password = TEST_ROOT_PASSWORD
     # The unlock prompt goes to the kernel's last console; make that the
     # serial port so this test can answer it.
-    extra = ""
+    extra = " --root-password-file /run/t-root"
     if args.encrypt:
-        extra = (" --encrypt-data --passphrase-file /run/t-pass --root-password-file /run/t-root"
-                 " --kernel-args 'console=tty0 console=ttyS0,115200'")
+        extra += (" --encrypt-data --passphrase-file /run/t-pass"
+                  " --kernel-args 'console=tty0 console=ttyS0,115200'")
 
     args.workdir.mkdir(parents=True, exist_ok=True)
     nvram = args.workdir / "OVMF_VARS.install.fd"
@@ -74,7 +74,8 @@ def main() -> int:
         try:
             vm = Vm(args.image, args.ovmf_code, nvram, log, cdrom=True, extra_disk=disk)
             vm.login()
-            step("boot: live ISO with a blank disk attached reaches a login prompt", True)
+            step("boot: live ISO with a blank disk attached reaches a shell (automatic console login)",
+                 vm.autologin)
 
             rc, out = vm.run("cidint-install --list")
             step("installer lists the candidate disks", rc == 0 and "/dev/sda" in out, out)
@@ -92,12 +93,20 @@ def main() -> int:
             rc, out = vm.run("cidint-install --target /dev/sr0 --confirm-erase /dev/sr0")
             step("refuses the live medium as a target (exit 7)", rc == 7, out)
 
+            rc, out = vm.run("cidint-install --target /dev/sda --confirm-erase /dev/sda </dev/null")
+            step("refuses an unattended install without a root password (exit 7)",
+                 rc == 7 and partitions(vm) == "0", out)
+            rc, out = vm.run("echo short > /run/t-short; cidint-install --target /dev/sda "
+                             "--confirm-erase /dev/sda --root-password-file /run/t-short")
+            step("refuses a root password shorter than 8 characters (exit 7)",
+                 rc == 7 and partitions(vm) == "0", out)
+            vm.run(f"umask 077; echo '{root_password}' > /run/t-root")
             if args.encrypt:
-                rc, out = vm.run("echo short > /run/t-short; cidint-install --target /dev/sda "
-                                 "--confirm-erase /dev/sda --encrypt-data --passphrase-file /run/t-short")
+                rc, out = vm.run("cidint-install --target /dev/sda --confirm-erase /dev/sda "
+                                 "--root-password-file /run/t-root --encrypt-data --passphrase-file /run/t-short")
                 step("refuses a passphrase shorter than 8 characters (exit 7)",
                      rc == 7 and partitions(vm) == "0", out)
-                vm.run(f"umask 077; echo '{passphrase}' > /run/t-pass; echo '{root_password}' > /run/t-root")
+                vm.run(f"umask 077; echo '{passphrase}' > /run/t-pass")
 
             rc, out = vm.run("cidint-install --target /dev/sda --confirm-erase /dev/sda" + extra, timeout=1500)
             step("confirmed installation completes", rc == 0 and "installation finished" in out, out)
@@ -108,7 +117,7 @@ def main() -> int:
                 step("the installer closed the encrypted volume", out == "0", out)
             step("the disk has the four CIDINT partitions", partitions(vm) == "4", partitions(vm))
 
-            rc, out = vm.run("cidint-install --target /dev/sda --confirm-erase /dev/sda")
+            rc, out = vm.run("cidint-install --target /dev/sda --confirm-erase /dev/sda --root-password-file /run/t-root")
             step("refuses a disk that already holds data without --erase-existing (exit 7)", rc == 7, out)
 
             vm.send("sync; systemctl poweroff")
@@ -126,8 +135,8 @@ def main() -> int:
         proc = subprocess.run(
             [sys.executable, str(HERE / "persistence_boot_test.py"), str(disk),
              "--ovmf-code", str(args.ovmf_code), "--ovmf-vars", str(args.ovmf_vars),
-             "--workdir", str(sub)]
-            + (["--passphrase", passphrase, "--root-password", root_password] if args.encrypt else []),
+             "--workdir", str(sub), "--root-password", root_password]
+            + (["--passphrase", passphrase] if args.encrypt else []),
             capture_output=True, text=True)
         print(proc.stdout, end="")
         print(proc.stderr, end="", file=sys.stderr)

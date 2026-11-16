@@ -6,26 +6,54 @@
 # as the unprivileged user "cidint-ai", cannot gain privileges, and can
 # read the model directory but cannot write to the system or to user data.
 #
-#   cidint-ai status              engine, model directory, models found
+#   cidint-ai status              engine, model directories, models found
 #   cidint-ai models              list installed models
+#   cidint-ai chat [-m MODEL] [-n TOKENS] ["QUESTION"]
+#                                 answer one question with the model's chat
+#                                 template; without QUESTION, a conversation
 #   cidint-ai ask [-m MODEL] [-n TOKENS] [-s SEED] "PROMPT"
+#                                 plain text continuation of PROMPT
 #   cidint-ai sandbox-check       show what the sandbox allows (for tests)
 #
-# No model is shipped with CIDINT OS. Put a GGUF model file into
-# /data/apps/ai/models/ (as root). The engine answers with what the model
-# produces; it has no tools, no file access and no way to run commands.
+# CIDINT OS includes one small model, SmolLM2-135M-Instruct (Apache-2.0),
+# in /usr/share/cidint/ai/models/. It is small: it follows simple
+# instructions and is often wrong. More GGUF models can be put into
+# /data/apps/ai/models/ (as root); those are preferred over the included
+# one. The engine answers with what the model produces; it has no tools,
+# no file access and no way to run commands.
 #
 # Exit codes: 0 ok, 1 failure, 2 usage, 3 no model installed, 6 not root.
 set -eu
 
 PROG=cidint-ai
 MODELS=/data/apps/ai/models
+BUNDLED=/usr/share/cidint/ai/models
 ENGINE=/usr/bin/llama-completion
 USER_NAME=cidint-ai
 
 fail() { echo "$PROG: error: $*" >&2; exit 1; }
 
-list_models() { ls "$MODELS"/*.gguf 2>/dev/null || true; }
+list_models() { ls "$MODELS"/*.gguf "$BUNDLED"/*.gguf 2>/dev/null || true; }
+
+# pick_model NAME -> $MODEL (full path); the first model if NAME is empty.
+pick_model() {
+    if [ -z "$1" ]; then
+        MODEL=$(list_models | head -n 1)
+    else
+        case "$1" in */*) echo "$PROG: give the model's file name, not a path" >&2; exit 2 ;; esac
+        MODEL=""
+        for d in "$MODELS" "$BUNDLED"; do
+            [ -f "$d/$1" ] && { MODEL="$d/$1"; break; }
+        done
+    fi
+    [ -n "$MODEL" ] && [ -f "$MODEL" ] || { echo "$PROG: model not found (looked in $MODELS and $BUNDLED)" >&2; exit 3; }
+}
+
+# Plain text: no colour codes, no end marker.
+clean() {
+    ESC=$(printf '\033')
+    sed -e "s/${ESC}\[[0-9;]*m//g" -e 's/ *\[end of text\]$//'
+}
 
 # Run a command inside the inference sandbox.
 sandbox() {
@@ -57,14 +85,44 @@ need_root() { [ "$(id -u)" -eq 0 ] || { echo "$PROG: must be run as root in this
 case "${1:-}" in
     status)
         echo "engine          : $ENGINE $([ -x "$ENGINE" ] && echo '(installed)' || echo '(MISSING)')"
-        echo "model directory : $MODELS"
+        echo "model directory : $MODELS (yours), $BUNDLED (included)"
         echo "models          : $(list_models | wc -l)"
+        echo "default model   : $(basename "$(list_models | head -n 1)" 2>/dev/null)"
         echo "network access  : none (sandboxed)"
         ;;
     models)
         list_models | while read -r f; do
-            [ -n "$f" ] && echo "$(basename "$f")  $(( $(stat -c %s "$f") / 1024 )) KiB"
+            case "$f" in "$BUNDLED"/*) where=included ;; *) where=yours ;; esac
+            [ -n "$f" ] && echo "$(basename "$f")  $(( $(stat -c %s "$f") / 1024 )) KiB  ($where)"
         done
+        ;;
+    chat)
+        need_root
+        shift
+        MODEL="" TOKENS=256
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                -m) [ $# -ge 2 ] || exit 2; MODEL="$2"; shift 2 ;;
+                -n) [ $# -ge 2 ] || exit 2; TOKENS="$2"; shift 2 ;;
+                *) break ;;
+            esac
+        done
+        [ $# -le 1 ] || { echo "Usage: $PROG chat [-m MODEL] [-n TOKENS] [\"QUESTION\"]" >&2; exit 2; }
+        case "$TOKENS" in ''|*[!0-9]*) echo "$PROG: -n needs a number" >&2; exit 2 ;; esac
+        [ -x "$ENGINE" ] || fail "the inference engine is not installed"
+        pick_model "$MODEL"
+        SYS="You are the assistant of CIDINT OS. Answer briefly and plainly. If you do not know, say so."
+        if [ $# -eq 1 ]; then
+            # One question, one answer (the model's own chat template).
+            OUT=$(sandbox "$ENGINE" -m "$MODEL" -c 2048 -cnv -st -sys "$SYS" -p "$1" \
+                    --no-display-prompt --simple-io -n "$TOKENS" --temp 0.2 -s 1 </dev/null 2>/dev/null) \
+                || fail "the engine ended with an error"
+            printf '%s\n' "$OUT" | clean | sed -e '/^> *$/d'
+        else
+            echo "Conversation with $(basename "$MODEL"). Type a question and press Enter; Ctrl-D ends."
+            sandbox "$ENGINE" -m "$MODEL" -c 4096 -cnv -sys "$SYS" --simple-io -n "$TOKENS" 2>/dev/null \
+                || fail "the engine ended with an error"
+        fi
         ;;
     ask)
         need_root
@@ -81,19 +139,11 @@ case "${1:-}" in
         [ $# -eq 1 ] || { echo "Usage: $PROG ask [-m MODEL] [-n TOKENS] [-s SEED] \"PROMPT\"" >&2; exit 2; }
         case "$TOKENS" in ''|*[!0-9]*) echo "$PROG: -n needs a number" >&2; exit 2 ;; esac
         [ -x "$ENGINE" ] || fail "the inference engine is not installed"
-        if [ -z "$MODEL" ]; then
-            MODEL=$(list_models | head -n 1)
-        else
-            case "$MODEL" in */*) echo "$PROG: give the model's file name, not a path" >&2; exit 2 ;; esac
-            MODEL="$MODELS/$MODEL"
-        fi
-        [ -n "$MODEL" ] && [ -f "$MODEL" ] || { echo "$PROG: no model installed in $MODELS" >&2; exit 3; }
-        set -- "$ENGINE" -m "$MODEL" -no-cnv --no-display-prompt --simple-io -n "$TOKENS" -p "$1"
+        pick_model "$MODEL"
+        set -- "$ENGINE" -m "$MODEL" -c 2048 -no-cnv --no-display-prompt --simple-io -n "$TOKENS" -p "$1"
         [ -z "$SEED" ] || set -- "$@" -s "$SEED"
-        # Strip terminal colour codes: the answer is plain text.
         OUT=$(sandbox "$@" 2>/dev/null) || fail "the engine ended with an error"
-        ESC=$(printf '\033')
-        printf '%s\n' "$OUT" | sed "s/${ESC}\[[0-9;]*m//g"
+        printf '%s\n' "$OUT" | clean
         ;;
     sandbox-check)
         need_root
@@ -107,7 +157,7 @@ case "${1:-}" in
         '
         ;;
     *)
-        sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' >&2
+        sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//' >&2
         exit 2
         ;;
 esac

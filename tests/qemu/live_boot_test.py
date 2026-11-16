@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Boot the CIDINT live ISO in QEMU (UEFI, as a CD-ROM) and check the
-amnesic contract: acceptance test P15, "amnesic mode does not persist".
+"""Boot the CIDINT live ISO in QEMU and check the amnesic contract:
+acceptance test P15, "amnesic mode does not persist".
 
     python3 tests/qemu/live_boot_test.py IMAGE.iso --ovmf-code F --ovmf-vars F
+        [--usb] [--legacy-bios]
 
-The ISO is attached read-only as a CD-ROM; no disk is present in the VM.
-Exit code 0 only if every check passed.
+The ISO is attached read-only, as a CD-ROM or (--usb) as a USB stick, and
+started with UEFI firmware or (--legacy-bios) with SeaBIOS. No disk is
+present in the VM. Exit code 0 only if every check passed.
 
 Sequence:
   boot 1  mode is live_amnesic and the layout is consistent with it, /data
@@ -30,11 +32,16 @@ def main() -> int:
     ap.add_argument("--ovmf-code", type=Path, required=True)
     ap.add_argument("--ovmf-vars", type=Path, required=True)
     ap.add_argument("--workdir", type=Path, default=Path("artifacts/qemu-test"))
+    ap.add_argument("--usb", action="store_true", help="attach the ISO as a USB stick")
+    ap.add_argument("--legacy-bios", action="store_true", help="start with SeaBIOS instead of UEFI")
     args = ap.parse_args()
 
     args.workdir.mkdir(parents=True, exist_ok=True)
     nvram = args.workdir / "OVMF_VARS.live.fd"
     shutil.copyfile(args.ovmf_vars, nvram)
+    fw = "legacy BIOS" if args.legacy_bios else "UEFI"
+    medium = "USB stick" if args.usb else "CD-ROM"
+    code, vars_ = (None, None) if args.legacy_bios else (args.ovmf_code, nvram)
 
     results = []
 
@@ -48,9 +55,17 @@ def main() -> int:
     with open(log_path, "w", encoding="utf-8") as log:
         vm = None
         try:
-            vm = Vm(args.image, args.ovmf_code, nvram, log, cdrom=True)
+            vm = Vm(args.image, code, vars_, log, cdrom=not args.usb, usb=args.usb)
             vm.login()
-            step("boot: live ISO reaches a login prompt under UEFI", True)
+            step(f"boot: live ISO as a {medium} starts under {fw} and logs in on the console", True)
+            step("live medium: automatic console login (root has no password to type)", vm.autologin)
+            rc, out = vm.run("test -d /sys/firmware/efi && echo uefi || echo bios")
+            step(f"the system really started under {fw}", out == ("bios" if args.legacy_bios else "uefi"), out)
+            if args.usb:
+                rc, out = vm.run("for d in /sys/block/sd*; do readlink -f $d; done; grep -c ' /run/media/' /proc/mounts")
+                step("the live medium is a USB disk", "/usb" in out, out)
+            rc, out = vm.run("awk -F: '$1 == \"root\" { print $2 }' /etc/shadow")
+            step("root's password is locked, not empty", out in ("*", "!", "!*"), out)
 
             rc, out = vm.run("cat /proc/cmdline")
             step("kernel command line declares cidint.mode=amnesic", "cidint.mode=amnesic" in out, out)

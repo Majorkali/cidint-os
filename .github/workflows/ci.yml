@@ -86,6 +86,19 @@ jobs:
           scripts/ci-run.sh "pip install kas" "$HOME/kas-venv/bin/pip" install kas==4.8.2
           scripts/ci-run.sh "kas --version" "$HOME/kas-venv/bin/kas" --version
           ls -l /usr/share/OVMF/
+      - name: Development update-signing key (this run only)
+        # A throwaway Ed25519 key: its public half is built into the images,
+        # the private half stays in the runner's temporary directory, is used
+        # by the update test and is never uploaded. Updates from this run can
+        # only be applied to images from this run. Not a release key.
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/update-key"
+          openssl genpkey -algorithm ed25519 -out "$RUNNER_TEMP/update-key/dev.key"
+          openssl pkey -in "$RUNNER_TEMP/update-key/dev.key" -pubout -out "$RUNNER_TEMP/update-key/dev.pub"
+          echo "CIDINT_UPDATE_PUBKEY=$(sed -n 2p "$RUNNER_TEMP/update-key/dev.pub")" >> "$GITHUB_ENV"
+          echo "::notice title=Update key::development key for this run: $(sed -n 2p "$RUNNER_TEMP/update-key/dev.pub")"
       - name: Restore build caches
         uses: actions/cache/restore@v4
         with:
@@ -137,6 +150,7 @@ jobs:
           cp -L "$dsk" artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-x86_64.wic
           cp -L "$dsl" artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-live-x86_64.iso
           cp -L "$deploy"/cidint-image-base-genericx86-64*.spdx.tar.zst artifacts/image/ 2>/dev/null || echo "no SPDX archive found"
+          cp "$RUNNER_TEMP/update-key/dev.pub" artifacts/image/cidint-os-${CIDINT_VERSION}-update-key-DEVELOPMENT.pub
           ls -l artifacts/image
           echo "::notice title=Image files::$(cd artifacts/image && stat -c '%n %s bytes' * | tr '\n' ';')"
       - name: Boot and persistence test, disk image (QEMU, UEFI)
@@ -145,7 +159,8 @@ jobs:
           scripts/ci-run.sh "QEMU persistence test" python3 tests/qemu/persistence_boot_test.py \
             artifacts/image/cidint-os-${CIDINT_VERSION}-x86_64.wic \
             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
-            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd \
+            --expect-first-start
       - name: Boot and amnesic test, live ISO (QEMU, UEFI)
         # Also after an earlier test failed: every result is wanted.
         if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
@@ -154,6 +169,30 @@ jobs:
             artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso \
             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: Live ISO as a USB stick (QEMU, UEFI)
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        run: |
+          scripts/ci-run.sh "QEMU live USB test" python3 tests/qemu/live_boot_test.py \
+            artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso \
+            --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd \
+            --usb --workdir artifacts/qemu-test/live-usb
+      - name: Live ISO under legacy BIOS (QEMU, SeaBIOS, CD-ROM)
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        run: |
+          scripts/ci-run.sh "QEMU live BIOS test" python3 tests/qemu/live_boot_test.py \
+            artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso \
+            --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd \
+            --legacy-bios --workdir artifacts/qemu-test/live-bios
+      - name: Live ISO as a USB stick under legacy BIOS (QEMU, SeaBIOS)
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        run: |
+          scripts/ci-run.sh "QEMU live BIOS USB test" python3 tests/qemu/live_boot_test.py \
+            artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso \
+            --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd \
+            --legacy-bios --usb --workdir artifacts/qemu-test/live-bios-usb
       - name: Install to a blank disk, then persistence test (QEMU, UEFI)
         # Also after an earlier test failed: every result is wanted.
         if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
@@ -188,6 +227,7 @@ jobs:
         run: |
           scripts/ci-run.sh "QEMU update test" python3 tests/qemu/update_test.py \
             artifacts/image/cidint-os-${CIDINT_VERSION}-live-x86_64.iso \
+            --signing-key "$RUNNER_TEMP/update-key/dev.key" \
             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
       - name: Desktop edition, graphical session and screen contents (QEMU, UEFI)
@@ -205,10 +245,18 @@ jobs:
             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd \
             --cdrom --workdir artifacts/qemu-test/desktop-live
-      - name: AI engine, sandbox and inference with a test model (QEMU, UEFI)
+      - name: Desktop Edition installed from its live ISO, then tested (QEMU, UEFI)
         if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
         run: |
-          # Test fixture only: a tiny story model (about 1 MB). Not shipped.
+          scripts/ci-run.sh "QEMU desktop install test" python3 tests/qemu/desktop_install_test.py \
+            artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-live-x86_64.iso \
+            --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: AI engine, included model, sandbox, chat and inference (QEMU, UEFI)
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        run: |
+          # Test fixture only: a tiny story model (about 1 MB) standing for a
+          # model the user adds. The included model is in the image.
           mkdir -p artifacts/model
           scripts/ci-run.sh "download test model" curl -fsSL --retry 5 -o artifacts/model/stories260K.gguf \
             https://huggingface.co/ggml-org/models-moved/resolve/main/tinyllamas/stories260K.gguf

@@ -30,17 +30,34 @@ from pathlib import Path
 
 LOGIN_TIMEOUT = 900  # generous: hosted runners may lack KVM
 CMD_TIMEOUT = 120
+# Throwaway root password for disposable test machines: given at the
+# first-start prompt of disk images and to the installer.
+TEST_ROOT_PASSWORD = "cidint-test-root-9"
+SHELL_PROMPT = r"root@[\w.-]+:[^\r\n]*# "
 
 
 class Vm:
-    def __init__(self, image: Path, code: Path, nvram: Path, log, cdrom: bool = False,
+    def __init__(self, image: Path, code: Path | None, nvram: Path | None, log, cdrom: bool = False,
                  extra_disk: Path | None = None, passphrase: str | None = None,
-                 root_password: str = "", nic: list[str] | None = None):
+                 root_password: str = TEST_ROOT_PASSWORD, nic: list[str] | None = None,
+                 usb: bool = False):
+        """code/nvram None: legacy BIOS (SeaBIOS) instead of UEFI.
+        usb: attach the image as a read-only USB stick instead."""
         self.passphrase = passphrase
         self.root_password = root_password
         self.unlock_prompts = 0
+        self.first_start_prompts = 0
+        self.autologin = False
+        self.password_asked = False
         accel = ["-enable-kvm", "-cpu", "host"] if os.access("/dev/kvm", os.W_OK) else ["-cpu", "max"]
-        if cdrom:
+        firmware = [] if code is None else [
+            "-drive", f"if=pflash,format=raw,readonly=on,file={code}",
+            "-drive", f"if=pflash,format=raw,file={nvram}"]
+        if usb:
+            media = ["-device", "qemu-xhci,id=xhci",
+                     "-drive", f"file={image},format=raw,if=none,id=stick,readonly=on",
+                     "-device", "usb-storage,bus=xhci.0,drive=stick,removable=on"]
+        elif cdrom:
             media = ["-cdrom", str(image)]
             if extra_disk is not None:
                 media += ["-drive", f"file={extra_disk},format=raw,if=none,id=disk0",
@@ -50,8 +67,7 @@ class Vm:
                      "-device", "ide-hd,drive=disk0,bus=ide.0"]
         cmd = [
             "qemu-system-x86_64", "-machine", "q35", "-m", "2048", "-smp", "2", *accel,
-            "-drive", f"if=pflash,format=raw,readonly=on,file={code}",
-            "-drive", f"if=pflash,format=raw,file={nvram}",
+            *firmware,
             *media,
             "-display", "none", "-serial", "stdio", "-monitor", "none",
             *(nic or ["-nic", "none"]),
@@ -93,9 +109,37 @@ class Vm:
         self.proc.stdin.flush()
 
     def login(self):
+        """Get a root shell on the serial console: answer the disk
+        passphrase and first-start password prompts, log in with the root
+        password, or accept the automatic login of a live medium."""
+        self.autologin = False
+        self.password_asked = False
         while True:
-            m = self.expect(r"(login: |Please enter passphrase for disk)", LOGIN_TIMEOUT)
-            if m.group(1).startswith("login"):
+            m = self.expect(r"(login: |Please enter passphrase for disk|Choose a root password[^:]*: "
+                            r"|Repeat the root password: |" + SHELL_PROMPT + ")", LOGIN_TIMEOUT)
+            g = m.group(1)
+            if g.startswith("root@"):
+                # A shell without a login prompt: a live medium's automatic
+                # login. Only acceptable there.
+                self.autologin = True
+                break
+            if g.startswith("Choose") or g.startswith("Repeat"):
+                if g.startswith("Choose"):
+                    self.first_start_prompts += 1
+                    if self.first_start_prompts > 3:
+                        raise RuntimeError("the first-start root password prompt repeated more than 3 times")
+                time.sleep(1)
+                self.send(self.root_password)
+                continue
+            if g.startswith("login"):
+                time.sleep(1.5)
+                with self.lock:
+                    auto = "automatic login" in self.buf[:80]
+                if auto:
+                    self.expect(SHELL_PROMPT, 120)
+                    self.autologin = True
+                    break
+                self._password_login()
                 break
             # Encrypted data volume: systemd asks on the console before the
             # system can finish starting.
@@ -106,16 +150,6 @@ class Vm:
                 raise RuntimeError("the disk passphrase was asked for more than 6 times")
             time.sleep(2)
             self.send(self.passphrase)
-        time.sleep(1)
-        self.send("root")
-        # Wait for the shell (or a password prompt: the development image
-        # has an empty root password) instead of guessing with a sleep.
-        m = self.expect(r"(Password: |[#$] )", 120)
-        if self.root_password and not m.group(1).startswith("Password"):
-            raise RuntimeError("root was logged in without the password that was set")
-        if m.group(1).startswith("Password"):
-            self.send(self.root_password)
-            self.expect(r"[#$] ", 120)
         self.send("stty -echo; export PS1=''")
         last = None
         for _ in range(4):
@@ -125,6 +159,17 @@ class Vm:
             except TimeoutError as e:
                 last = e
         raise last
+
+    def _password_login(self):
+        self.send("root")
+        m = self.expect(r"(Password: |" + SHELL_PROMPT + ")", 120)
+        if not m.group(1).startswith("Password"):
+            raise RuntimeError("root was logged in without a password on an installed system")
+        self.password_asked = True
+        self.send(self.root_password)
+        m = self.expect(r"(" + SHELL_PROMPT + "|Login incorrect)", 120)
+        if m.group(1).startswith("Login"):
+            raise RuntimeError("the root password was not accepted")
 
     def run(self, command: str, timeout: float = CMD_TIMEOUT) -> tuple[int, str]:
         """Run a shell command in the guest; return (exit status, output)."""
@@ -163,7 +208,10 @@ def main() -> int:
     ap.add_argument("--ovmf-vars", type=Path, required=True)
     ap.add_argument("--workdir", type=Path, default=Path("artifacts/qemu-test"))
     ap.add_argument("--passphrase", help="data volume passphrase; also turns on the encryption checks")
-    ap.add_argument("--root-password", default="", help="root password set at installation")
+    ap.add_argument("--root-password", default=TEST_ROOT_PASSWORD,
+                    help="root password set at installation (or to give at the first-start prompt)")
+    ap.add_argument("--expect-first-start", action="store_true",
+                    help="a fresh disk image: the first start must ask for a root password")
     args = ap.parse_args()
     vmopts = {"passphrase": args.passphrase, "root_password": args.root_password}
 
@@ -196,9 +244,12 @@ def main() -> int:
                 rc, out = vm.run("grep ' /data ' /proc/mounts")
                 step("encryption: /data is mounted from the unlocked volume",
                      rc == 0 and out.startswith("/dev/mapper/cidint-data "), out)
-            if args.root_password:
-                rc, out = vm.run("cut -d: -f2 /etc/shadow | head -n 1 | cut -c1-3")
-                step("root password: stored as a hash, and login required it", rc == 0 and out == "$6$", out)
+            if args.expect_first_start:
+                step("first start: root has no default password; the console asked for one",
+                     vm.first_start_prompts == 1, f"prompts={vm.first_start_prompts}")
+            rc, out = vm.run("awk -F: '$1 == \"root\" { print substr($2, 1, 3) }' /etc/shadow")
+            step("root password: stored as a SHA-512 hash, and login required it",
+                 rc == 0 and out == "$6$" and vm.password_asked and not vm.autologin, out)
 
             rc, out = vm.run("cidint persistence status --json")
             report = json.loads(out)["data"] if out.startswith("{") else {}
@@ -223,6 +274,8 @@ def main() -> int:
             rc2, id2 = vm.run("cat /proc/sys/kernel/random/boot_id")
             step("a real reboot happened (kernel boot id changed)", rc1 == 0 and rc2 == 0 and id1 != id2,
                  f"{id1} -> {id2}")
+            step("the root password survived the restart (no second first-start prompt)",
+                 vm.password_asked and vm.first_start_prompts <= 1, f"prompts={vm.first_start_prompts}")
             rc, out = vm.run("cidint persistence verify")
             step("P1: reboot marker survived restart", rc == 0 and "PASS" in out, out)
             rc, out = vm.run("cat /home/root/kept.txt")

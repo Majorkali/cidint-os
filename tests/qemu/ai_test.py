@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Boot the CIDINT image in QEMU and test the local AI engine: sandbox
-properties first, then a real inference with a tiny test model.
+"""Boot the CIDINT image in QEMU and test the local AI engine: the included
+model, sandbox properties, a chat answer from the included model, and
+inference with a model the user adds.
 
     python3 tests/qemu/ai_test.py IMAGE.wic --model FILE.gguf --ovmf-code F --ovmf-vars F
 
 The image is copied first; the build output is never modified. Exit code
 0 only if every check passed.
 
-The model is a test fixture supplied by the caller (CI downloads a tiny
-story model of about 1 MB). CIDINT OS ships no model. The test shows that
-inference runs on the system inside the sandbox; it says nothing about
-the quality of any model.
+--model is a test fixture supplied by the caller (CI downloads a tiny
+story model of about 1 MB) that stands for a model the user adds. The
+included model is SmolLM2-135M-Instruct. The chat check records the
+answer; it shows that the engine answers with the model's chat template,
+not that the answer is right.
 """
 import argparse
 import functools
@@ -65,11 +67,18 @@ def main() -> int:
             vm.login()
             step("boot: image reaches a login prompt", True)
 
+            bundled = "SmolLM2-135M-Instruct-Q8_0.gguf"
             rc, out = vm.run("cidint-ai status")
-            step("engine is installed; no model is shipped",
-                 rc == 0 and "(installed)" in out and re.search(r"models\s*: 0", out) is not None, out)
-            rc, out = vm.run("cidint-ai ask 'hello'")
-            step("asking without a model is refused with a clear message (exit 3)", rc == 3, f"rc={rc} {out}")
+            step("engine is installed; the included model is the default",
+                 rc == 0 and "(installed)" in out and re.search(r"models\s*: 1", out) is not None
+                 and bundled in out, out)
+            rc, out = vm.run(f"sha256sum /usr/share/cidint/ai/models/{bundled} | cut -d' ' -f1; "
+                             f"grep -c 'Apache License 2.0' /usr/share/cidint/ai/models/{bundled}.NOTICE")
+            step("the included model matches its pinned checksum and carries its licence notice",
+                 out.split() == ["5a1395716f7913741cc51d98581b9b1228d80987a9f7d3664106742eb06bba83", "1"], out)
+            rc, out = vm.run("cidint-ai ask -m missing.gguf 'hello'")
+            step("asking for a model that is not installed is refused with a clear message (exit 3)",
+                 rc == 3, f"rc={rc} {out}")
 
             rc, out = vm.run("cidint-ai sandbox-check", timeout=120)
             facts = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
@@ -79,6 +88,17 @@ def main() -> int:
                  facts.get("write_data") == "denied" and facts.get("write_system") == "denied", out)
             step("sandbox: cannot read user data, can read the model directory",
                  facts.get("read_home") == "denied" and facts.get("read_models") == "allowed", out)
+
+            question = "What is the capital of France? Answer with one word."
+            rc, answer = vm.run(f"cidint-ai chat -n 48 '{question}'", timeout=900)
+            words = re.findall(r"[A-Za-z]{2,}", answer)
+            step("chat: the included model answers a question (chat template, no raw markup)",
+                 rc == 0 and len(words) >= 1 and "<|im_" not in answer and "[end of text]" not in answer,
+                 f"rc={rc} answer={answer!r}")
+            print(f"       question: {question}\n       answer:   {answer[:300]!r}", flush=True)
+            # Recorded, not a pass condition: a 135M-parameter model can be wrong.
+            results[-1]["answer"] = answer[:1000]
+            results[-1]["answer_names_paris"] = "paris" in answer.lower()
 
             out = ""
             for _ in range(20):
@@ -91,9 +111,9 @@ def main() -> int:
             step("a model file is installed into the model directory",
                  rc == 0 and out.strip() == str(args.model.stat().st_size), out)
 
-            rc, text = vm.run("cidint-ai ask -n 48 -s 7 'Once upon a time'", timeout=900)
+            rc, text = vm.run("cidint-ai ask -m test.gguf -n 48 -s 7 'Once upon a time'", timeout=900)
             words = re.findall(r"[A-Za-z]{2,}", text)
-            step("inference: the engine generates text from the model", rc == 0 and len(words) >= 8,
+            step("inference: the engine generates text from a model the user added", rc == 0 and len(words) >= 8,
                  f"rc={rc} output={text!r}")
             print(f"       generated: {text[:200]!r}", flush=True)
 

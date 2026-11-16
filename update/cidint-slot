@@ -8,13 +8,17 @@
 # The data volume is never touched by an update.
 #
 #   cidint-slot status                 show the slots and any pending trial
-#   cidint-slot install DIR            write the update in DIR to the spare slot
+#   cidint-slot verify DIR             check an update's signature and checksums
+#   cidint-slot install DIR            verify, then write DIR to the spare slot
 #   cidint-slot confirm [--when-healthy]   commit the running trial slot
 #   cidint-slot cancel                 drop a trial that has not been started
 #
-# An update directory holds rootfs.img, bzImage and update.sha256 (output
-# of "sha256sum rootfs.img bzImage"). The checksums detect damage; they do
-# NOT prove who made the update. Signature checking is not implemented.
+# An update directory holds rootfs.img, bzImage, update.sha256 (output of
+# "sha256sum rootfs.img bzImage") and update.sha256.sig, an Ed25519
+# signature of update.sha256. An update is accepted only if the signature
+# matches one of the public keys in /usr/share/cidint/keys/update/ and both
+# files match their checksums. With no trusted key installed, every update
+# is refused. There is no version or anti-downgrade check yet.
 #
 # Exit codes: 0 ok, 1 failure, 2 usage, 3 not an installed A/B system,
 #             5 verification failed, 6 not root, 7 refused.
@@ -25,6 +29,7 @@ ENVFILE=/boot/EFI/BOOT/grubenv
 HOLD=/data/config/cidint/hold-update-confirm
 WORK=/run/cidint-slot
 SLOT_BYTES=1073741824
+KEYS=/usr/share/cidint/keys/update
 
 say()    { echo "$PROG: $*"; }
 fail()   { echo "$PROG: error: $*" >&2; exit 1; }
@@ -62,28 +67,60 @@ cmd_status() {
     echo "trial slot     : $(getenv trial)"
     echo "trial started  : $([ "$(getenv tried)" = 1 ] && echo yes || echo no)"
     echo "rolled back    : $([ "$(getenv rolled_back)" = 1 ] && echo yes || echo no)"
+    echo "trusted keys   : $(ls "$KEYS"/*.pem 2>/dev/null | wc -l)"
     [ ! -e "$HOLD" ] || echo "automatic confirmation is on hold ($HOLD exists)"
 }
 
 need_root() { [ "$(id -u)" -eq 0 ] || { echo "$PROG: must be run as root" >&2; exit 6; }; }
 
+bad() { echo "$PROG: verification failed: $*; nothing was written" >&2; exit 5; }
+
+# Signature first (who made it), then checksums (is it intact).
+verify_update() {
+    DIR=$1
+    for f in rootfs.img bzImage update.sha256 update.sha256.sig; do
+        [ -f "$DIR/$f" ] || bad "$DIR lacks $f"
+    done
+    command -v openssl >/dev/null 2>&1 || bad "openssl is not installed"
+    n=0 signer=""
+    for k in "$KEYS"/*.pem; do
+        [ -f "$k" ] || continue
+        n=$((n + 1))
+        if openssl pkeyutl -verify -pubin -inkey "$k" -rawin \
+                -in "$DIR/update.sha256" -sigfile "$DIR/update.sha256.sig" >/dev/null 2>&1; then
+            signer=$(basename "$k")
+            break
+        fi
+    done
+    [ "$n" -gt 0 ] || bad "no trusted update key is installed in $KEYS"
+    [ -n "$signer" ] || bad "the signature does not match any trusted key"
+    say "signature valid (key $signer)"
+    # Both files must be listed, and both must match.
+    for f in rootfs.img bzImage; do
+        grep -q "  $f\$" "$DIR/update.sha256" || bad "update.sha256 does not list $f"
+    done
+    ( cd "$DIR" && sha256sum -c update.sha256 >/dev/null 2>&1 ) || bad "checksum mismatch"
+    say "checksums match"
+    [ "$(stat -c %s "$DIR/rootfs.img")" -le "$SLOT_BYTES" ] || refuse "the system image does not fit a 1024 MiB slot"
+}
+
+cmd_verify() {
+    DIR=${1:-}
+    [ -n "$DIR" ] && [ -d "$DIR" ] || { echo "Usage: $PROG verify DIR" >&2; exit 2; }
+    verify_update "$DIR"
+}
+
 cmd_install() {
     need_root
     DIR=${1:-}
     [ -n "$DIR" ] && [ -d "$DIR" ] || { echo "Usage: $PROG install DIR" >&2; exit 2; }
-    for f in rootfs.img bzImage update.sha256; do
-        [ -f "$DIR/$f" ] || { echo "$PROG: verification failed: $DIR lacks $f" >&2; exit 5; }
-    done
     [ "$(getenv slot)" = "$CUR" ] || refuse "the running slot ($CUR) is not the committed one; confirm or restart first"
     [ -z "$(getenv trial)" ] || refuse "a trial of slot $(getenv trial) is already pending; restart, or run '$PROG cancel'"
-
-    # Both files must be listed, and both must match.
-    for f in rootfs.img bzImage; do
-        grep -q "  $f\$" "$DIR/update.sha256" || { echo "$PROG: verification failed: update.sha256 does not list $f" >&2; exit 5; }
-    done
-    ( cd "$DIR" && sha256sum -c update.sha256 >/dev/null 2>&1 ) \
-        || { echo "$PROG: verification failed: checksum mismatch; nothing was written" >&2; exit 5; }
-    [ "$(stat -c %s "$DIR/rootfs.img")" -le "$SLOT_BYTES" ] || refuse "the system image does not fit a 1024 MiB slot"
+    # The update directory must be root's alone, so it cannot change
+    # between the check and the write.
+    [ "$(stat -c %u "$DIR")" = 0 ] || refuse "$DIR must be owned by root"
+    case "$(stat -c %A "$DIR")" in ?????w????|????????w?) refuse "$DIR must not be writable by others" ;; esac
+    verify_update "$DIR"
 
     NEW=$(other "$CUR")
     DEV=$(slot_dev "$NEW")
@@ -167,8 +204,9 @@ cmd_cancel() {
 
 case "${1:-}" in
     status)  cmd_status ;;
+    verify)  shift; cmd_verify "$@" ;;
     install) shift; cmd_install "$@" ;;
     confirm) shift; cmd_confirm "$@" ;;
     cancel)  cmd_cancel ;;
-    *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+    *) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac

@@ -2,7 +2,11 @@
 """Install CIDINT OS in QEMU, then test A/B system updates on the installed
 disk: update to the spare slot, trial start, commit, and rollback.
 
-    python3 tests/qemu/update_test.py IMAGE.iso --ovmf-code F --ovmf-vars F
+    python3 tests/qemu/update_test.py IMAGE.iso --signing-key KEY.pem --ovmf-code F --ovmf-vars F
+
+KEY.pem is the private Ed25519 key whose public half was built into the
+image (CI makes a throwaway one per run). It stays on the host: the guest
+only receives the signature.
 
 Only a disposable virtual disk file is written. Exit code 0 only if every
 check passed.
@@ -13,8 +17,10 @@ spare slot, switching, confirming, going back - not a version change.
 
 Sequence:
   live session  install; leave an update directory on the data volume
-  start 1 (A)   a damaged update is refused and slot B stays empty;
-                the update is written to B
+  start 1 (A)   an unsigned update, one signed by an untrusted key, one
+                whose signed list was altered and one with a damaged
+                system image are all refused and slot B stays empty;
+                the correctly signed update is written to B
   start 2 (B)   the trial slot runs, user data is still there, and the
                 slot is committed automatically once the system is up
   start 3 (B)   B is still used. Automatic confirmation is put on hold
@@ -26,14 +32,18 @@ import argparse
 import json
 import os
 import re
+import base64
+import hashlib
 import shutil
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from persistence_boot_test import Vm, system_state  # noqa: E402
+from persistence_boot_test import TEST_ROOT_PASSWORD, Vm, system_state  # noqa: E402
 
 DISK_BYTES = 4 * 1024**3 + 64 * 1024**2
 BUNDLE = "/data/update-bundle"
@@ -50,13 +60,28 @@ def status(vm) -> dict:
     return info
 
 
+def sign(key: Path, data: bytes) -> str:
+    """Ed25519 signature of data with the host's key, base64."""
+    with tempfile.TemporaryDirectory() as tmp:
+        msg, sig = Path(tmp) / "m", Path(tmp) / "s"
+        msg.write_bytes(data)
+        subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", str(key), "-rawin",
+                        "-in", str(msg), "-out", str(sig)], check=True)
+        return base64.b64encode(sig.read_bytes()).decode()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("image", type=Path)
     ap.add_argument("--ovmf-code", type=Path, required=True)
     ap.add_argument("--ovmf-vars", type=Path, required=True)
     ap.add_argument("--workdir", type=Path, default=Path("artifacts/qemu-test/update"))
+    ap.add_argument("--signing-key", type=Path, required=True,
+                    help="private Ed25519 key (PEM) trusted by the image")
     args = ap.parse_args()
+    # A second key the image does not trust.
+    rogue = Path(tempfile.mkdtemp()) / "rogue.pem"
+    subprocess.run(["openssl", "genpkey", "-algorithm", "ed25519", "-out", str(rogue)], check=True)
 
     args.workdir.mkdir(parents=True, exist_ok=True)
     nvram = args.workdir / "OVMF_VARS.fd"
@@ -84,7 +109,9 @@ def main() -> int:
             # ---- live session: install, stage the update ----------------
             vm = Vm(args.image, args.ovmf_code, nvram, log, cdrom=True, extra_disk=disk)
             vm.login()
-            rc, out = vm.run("cidint-install --target /dev/sda --confirm-erase /dev/sda", timeout=1500)
+            vm.run(f"umask 077; echo '{TEST_ROOT_PASSWORD}' > /run/t-root")
+            rc, out = vm.run("cidint-install --target /dev/sda --confirm-erase /dev/sda "
+                             "--root-password-file /run/t-root", timeout=1500)
             step("installation completes", rc == 0 and "installation finished" in out, out)
             rc, out = vm.run(
                 "mkdir -p /run/t-src /run/t-data && mount -o ro /dev/sr0 /run/t-src && "
@@ -105,15 +132,45 @@ def main() -> int:
                  and st.get("trial slot") == "", st["_raw"])
             vm.run("echo 'kept across updates' > /home/root/update-kept.txt && sync")
 
-            vm.run(f"cd {BUNDLE} && sha256sum rootfs.img bzImage > update.sha256 && "
-                   f"cp update.sha256 good.sha256 && sed -i '1s/^[0-9a-f]*/{'0' * 64}/' update.sha256")
-            rc, out = vm.run(f"cmp -s {BUNDLE}/update.sha256 {BUNDLE}/good.sha256; echo differs=$?")
-            rc, out2 = vm.run(f"cidint-slot install {BUNDLE}", timeout=600)
-            rc_b, type_b = vm.run("blkid -o value -s TYPE /dev/sda3")
-            step("a damaged update is refused (exit 5) and slot B stays empty",
-                 "differs=1" in out and rc == 5 and type_b == "", f"{out} rc={rc} {out2} sda3 type={type_b!r}")
+            rc, out = vm.run("cidint-slot status | grep 'trusted keys'")
+            step("the image trusts exactly one update key", out.endswith(": 1"), out)
 
-            vm.run(f"cp {BUNDLE}/good.sha256 {BUNDLE}/update.sha256")
+            # The list of checksums is made in the guest, signed on the host.
+            vm.run(f"cd {BUNDLE} && sha256sum rootfs.img bzImage > update.sha256", timeout=300)
+            rc, listing = vm.run(f"cat {BUNDLE}/update.sha256")
+            rc, guest_hash = vm.run(f"sha256sum {BUNDLE}/update.sha256 | cut -d' ' -f1")
+            data = (listing + "\n").encode()
+            step("the checksum list was read back exactly", hashlib.sha256(data).hexdigest() == guest_hash,
+                 f"{guest_hash} {listing!r}")
+            good_sig = sign(args.signing_key, data)
+
+            def put_sig(b64: str):
+                vm.run(f"echo '{b64}' | openssl base64 -d -A > {BUNDLE}/update.sha256.sig")
+
+            def refused(name: str, setup: str = "", undo: str = ""):
+                if setup:
+                    vm.run(setup, timeout=120)
+                rc, out = vm.run(f"cidint-slot install {BUNDLE}", timeout=900)
+                if undo:
+                    vm.run(undo, timeout=120)
+                rc_b, type_b = vm.run("blkid -o value -s TYPE /dev/sda3")
+                step(f"{name}: refused (exit 5), slot B untouched", rc == 5 and type_b == "",
+                     f"rc={rc} {out} sda3 type={type_b!r}")
+
+            refused("an unsigned update", f"rm -f {BUNDLE}/update.sha256.sig")
+            put_sig(sign(rogue, data))
+            refused("an update signed by an untrusted key")
+            put_sig(good_sig)
+            refused("a signed checksum list that was altered afterwards",
+                    f"cp {BUNDLE}/update.sha256 /run/t-list && sed -i '1s/^/0/' {BUNDLE}/update.sha256",
+                    f"cp /run/t-list {BUNDLE}/update.sha256")
+            refused("a correctly signed update whose system image was damaged",
+                    f"dd if={BUNDLE}/rootfs.img of=/run/t-byte bs=1 skip=600 count=1 2>/dev/null && "
+                    f"printf X | dd of={BUNDLE}/rootfs.img bs=1 seek=600 conv=notrunc 2>/dev/null",
+                    f"dd if=/run/t-byte of={BUNDLE}/rootfs.img bs=1 seek=600 conv=notrunc 2>/dev/null")
+            rc, out = vm.run(f"cidint-slot verify {BUNDLE}", timeout=600)
+            step("the restored, correctly signed update verifies", rc == 0 and "signature valid" in out, out)
+
             rc, out = vm.run(f"cidint-slot install {BUNDLE}", timeout=900)
             st = status(vm)
             step("the update is written to slot B; trial pending, A still committed",

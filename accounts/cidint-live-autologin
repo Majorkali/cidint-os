@@ -1,0 +1,21 @@
+#!/bin/sh
+# systemd generator: on a live medium (cidint.mode=amnesic) log root in
+# automatically on the local consoles. Live sessions keep nothing and root
+# has no password there; no network login service exists and inbound
+# connections are dropped by the firewall. Installed systems are untouched.
+set -eu
+out=${1:-/run/systemd/generator}
+
+tr ' ' '\n' < /proc/cmdline | grep -qx 'cidint.mode=amnesic' || exit 0
+
+mkdir -p "$out/serial-getty@.service.d" "$out/getty@.service.d"
+cat > "$out/serial-getty@.service.d/cidint-live-autologin.conf" <<'EOF'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty -8 -L --autologin root --keep-baud 115200,38400,9600 %I $TERM
+EOF
+cat > "$out/getty@.service.d/cidint-live-autologin.conf" <<'EOF'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --noclear --autologin root %I $TERM
+EOF
