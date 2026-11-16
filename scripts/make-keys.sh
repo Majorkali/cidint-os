@@ -19,6 +19,9 @@
 #
 # Needs openssl and gpg. Exit codes: 0 ok, 1 failure, 2 usage.
 set -eu
+# Git Bash on Windows turns an argument like "/CN=..." into a Windows path;
+# there, a leading "//" keeps it as written.
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) S=/ ;; *) S= ;; esac
 DEV=0
 [ "${1:-}" = "--dev" ] && { DEV=1; shift; }
 [ $# -eq 1 ] || { echo "Usage: $0 [--dev] DIR" >&2; exit 2; }
@@ -41,7 +44,7 @@ mkdir -p "$DIR/boot/gnupg"
 chmod 700 "$DIR/boot/gnupg"
 for k in PK KEK db; do
     openssl req -new -x509 -newkey rsa:2048 -nodes -sha256 -days $DAYS \
-        -subj "/CN=CIDINT OS Secure Boot $k ($KIND)/" -keyout "$DIR/boot/$k.key" -out "$DIR/boot/$k.crt" 2>/dev/null
+        -subj "$S/CN=CIDINT OS Secure Boot $k ($KIND)" -keyout "$DIR/boot/$k.key" -out "$DIR/boot/$k.crt" 2>/dev/null
     openssl x509 -in "$DIR/boot/$k.crt" -outform DER -out "$DIR/boot/$k.cer"
 done
 gpg --homedir "$DIR/boot/gnupg" --batch --pinentry-mode loopback --passphrase '' \
