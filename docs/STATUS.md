@@ -33,15 +33,35 @@ The authoritative list is `services/cidint-core/src/features.rs`
 - Console installer `cidint-install`: refuses unconfirmed, mismatched,
   live-medium and already-populated targets; installs to a blank virtual
   disk; the installed system passes the reboot and power-loss tests
+- Encrypted data volume (LUKS2, `--encrypt-data`): passphrase at every start,
+  survives reboot and power cut, file text not readable on the raw disk
+- Root password set at installation (stored as a SHA-512 hash, login requires it)
+- Firewall (nftables): outbound allowed, an inbound connection is dropped
+- A/B updates (`cidint-slot`): damaged update refused, update to the spare
+  slot, trial start, automatic commit, rollback of an unconfirmed trial after
+  a power cut; user data unchanged. Checksums only, no signatures
+- Server Edition image: SSH with keys only, host key and authorised keys on `/data`
+- Desktop Edition preview: Weston session as an unprivileged user, wallpaper,
+  panel and terminal seen on the real screen contents; also from a live ISO
+- Local AI engine (`cidint-ai`): sandbox without network or write access;
+  generated text from a 1 MB test model. No model is shipped
 
 Tested on: Windows 11 x86_64 development host (Rust 1.100.0 and 1.75.0),
 GitHub `ubuntu-22.04` runners, and the image in QEMU (q35, OVMF). The image
-disk-image test has passed three times; the live ISO test twice and the
-install test once (run 43702270151). Nothing has run on physical hardware.
+latest full run is 43747398237 (10 of 11 suites passed). The newer suites
+(desktop, AI) have passed once. Nothing has run on physical hardware.
+
+## Experimental
+
+- Security domains (`cidint-domain`): isolated micro-VMs with no network card
+  and no disk. In three runs, one domain start hung during its kernel
+  start-up. Nothing runs inside a domain and there is no transfer broker
 
 ## Implemented but not fully tested
 
-- Second system slot `system-b`: present in the layout, empty, never booted
+- Installing the Desktop Edition from its live ISO (the ISO boots; the
+  install from it was not run)
+- Updates to a different system version (the test re-installs the same one)
 - SPDX SBOM generation (enabled in the build; archive contents not checked)
 - The image, the live ISO and the installer on physical hardware (never tried)
 - Live ISO from a USB stick and under legacy BIOS (only CD-ROM under UEFI tried)
@@ -50,12 +70,13 @@ install test once (run 43702270151). Nothing has run on physical hardware.
 
 ## Planned (nothing exists yet)
 
-A/B update manager and rollback · LUKS2 encryption, TPM/FIDO2 unlock, recovery
-keys · privilege broker · SELinux enforcing · Secure/measured boot · security
-domains (KVM) and transfer broker · privacy modes and kill switch · NOVA
-desktop, themes and widgets · CNIE AI engine · CASME automation · CUAEE
-application engine · identity (MFA, LDAP, Kerberos) · server edition
-(databases, containers, HA) · persistent live USB, graphical installer,
+Signed updates and an update server · TPM/FIDO2 unlock, recovery keys,
+encrypted system slots · privilege broker · SELinux enforcing · Secure/measured
+boot · applications inside domains and a transfer broker · privacy modes and
+kill switch · NOVA desktop (login screen, settings, file manager, themes,
+widgets), hardware-accelerated graphics · AI beyond plain text generation ·
+CASME automation · CUAEE application engine · identity (MFA, LDAP, Kerberos)
+· server databases, containers, HA · persistent live USB, graphical installer,
 server, recovery and minimal ISOs · architectures other than x86_64 · accessibility and localisation.
 
 ## Unsupported

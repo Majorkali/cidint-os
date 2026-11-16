@@ -82,8 +82,8 @@ pub const FEATURES: &[Feature] = &[
     f(
         "persistence",
         "A/B system updates with rollback (cidint-slot, local update directory)",
-        Untested,
-        "tool and QEMU test written; checksum only, no signature verification",
+        Tested,
+        "QEMU: update, trial start, commit, rollback after power cut; checksum only, unsigned",
     ),
     f(
         "persistence",
@@ -94,8 +94,8 @@ pub const FEATURES: &[Feature] = &[
     f(
         "persistence",
         "LUKS2 encrypted data volume (installer option, passphrase at boot)",
-        Untested,
-        "installer option and QEMU test written; results in docs/TESTING.md",
+        Tested,
+        "QEMU: unlock at boot, reboot, power cut, raw disk unreadable; no recovery key",
     ),
     f(
         "persistence",
@@ -106,26 +106,26 @@ pub const FEATURES: &[Feature] = &[
     f(
         "security",
         "Host firewall, inbound default-deny (nftables)",
-        Untested,
-        "rule set and QEMU traffic test written; results in docs/TESTING.md",
+        Tested,
+        "QEMU: outbound works, inbound connection dropped; IPv4 over one interface only",
     ),
     f(
         "server",
         "Server Edition image: key-only SSH, host key and authorised keys on /data",
-        Untested,
-        "image and QEMU network test written; results in docs/TESTING.md",
+        Tested,
+        "QEMU: key login works, keyless refused, host key survives restart; SSH only",
     ),
     f(
         "desktop",
         "Graphical session preview (Weston, software rendering, no login screen)",
-        Untested,
-        "image, live ISO and QEMU screen test written; not the planned NOVA desktop",
+        Tested,
+        "QEMU: session starts unprivileged, wallpaper and a terminal on screen; not the NOVA desktop",
     ),
     f(
         "security",
         "Root password set at installation",
-        Untested,
-        "installer option written; the live ISO itself still has no root password",
+        Tested,
+        "QEMU: hash stored, login required it; the live ISOs themselves have no root password",
     ),
     f(
         "backup",
@@ -202,8 +202,8 @@ pub const FEATURES: &[Feature] = &[
     f(
         "security",
         "Security domains: isolated micro-VMs (cidint-domain start/stop/list)",
-        Untested,
-        "tool and QEMU test written; nothing runs inside a domain yet",
+        Experimental,
+        "QEMU: domains boot isolated, but one start hung in one of three runs; nothing runs inside",
     ),
     f(
         "security",
@@ -214,8 +214,8 @@ pub const FEATURES: &[Feature] = &[
     f(
         "ai",
         "Local AI engine: llama.cpp inference in a no-network sandbox (cidint-ai)",
-        Untested,
-        "tool and QEMU test written; no model is shipped, CPU baseline only",
+        Tested,
+        "QEMU: sandbox verified, text generated from a 1 MB test model; no model shipped",
     ),
     f(
         "privacy",

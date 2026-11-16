@@ -77,10 +77,10 @@ case "${1:-}" in
             -p RestrictSUIDSGID=yes -p LockPersonality=yes \
             -p CapabilityBoundingSet= \
             -p InaccessiblePaths=-/data \
-            "$QEMU" -name "$NAME" -machine q35,accel=kvm:tcg -cpu max -smp 1 -m "$MEM" \
+            "$QEMU" -name "$NAME" -machine q35,accel=kvm:tcg,hpet=off -cpu max -smp 1 -m "$MEM" \
                 -nodefaults -no-user-config -display none -vga none -nic none -no-reboot \
                 -kernel "$SHARE/bzImage" -initrd "$SHARE/base.cpio.gz" \
-                -append "console=ttyS0 panic=-1 cidint.domain=$NAME" \
+                -append "console=ttyS0 panic=-1 no_timer_check cidint.domain=$NAME" \
                 -serial "file:$RUN/$NAME/console.log" \
             || fail "could not start domain '$NAME'"
         echo "$PROG: domain '$NAME' started ($MEM MiB)"

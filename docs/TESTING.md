@@ -149,6 +149,42 @@ the installer stopped at the `dd` step with its error output discarded. The
 command was changed (no `conv=fsync`, errors shown) and the next run passed;
 the exact cause of the `dd` failure was not captured.
 
+### 2026-11-15, GitHub Actions run 43747398237
+
+First run in which the desktop and the AI engine passed. Eleven suites,
+ten passed. Results read from the per-check reports; evidence (reports,
+serial logs, screenshots) and the images were downloaded and the image
+checksums matched the build's `SHA256SUMS`.
+
+| Suite | Result |
+|---|---|
+| Base disk image: boot, reboot, power cut | 16/16 |
+| Console live ISO, amnesic | 10/10 |
+| Install to a blank disk | 11/11 |
+| Encrypted install, unlock at boot, power cut | 14/14 install, 20/20 installed |
+| Firewall with real traffic | 9/9 |
+| Server Edition, SSH over the network | 11/11 |
+| A/B update, commit, rollback | 15/15 |
+| Desktop Edition, screen contents | 7/7 |
+| Desktop live ISO | 7/7 |
+| AI engine, sandbox and inference | 10/10 |
+| Security domains | 14/17 |
+
+Security domains: KVM was available inside the test VM. Domain `personal`
+booted and passed every check. Domain `work` stopped during kernel
+start-up (last console line: `hpet0 ... counter`) and never reported ready;
+the three failed checks all follow from that. In run 43738233624 both
+domains booted. Cause not established.
+
+Failures on the way, same day, each fixed in the following commit:
+firewall rule syntax and missing connection tracking in the kernel;
+installer asking questions in unattended runs; `chpasswd` absent;
+after a power cut systemd stopped the file-system check of the unlocked
+volume and the system started without `/data` (replaced by
+`cidint-data-unlock`); SSH keys looked for under root's read-only home;
+Weston's PAM requirement and conflicting renderer settings; the emulator
+built without device-tree support; `sit0` fallback devices in sandboxes.
+
 Not run so far, and therefore unproven:
 
 - Anything on physical hardware.
