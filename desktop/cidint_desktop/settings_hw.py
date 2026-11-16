@@ -137,7 +137,232 @@ def mixer_control() -> str:
     return names[0] if names else ""
 
 
+def _volume_row(title, target, sound):
+    """A slider and a mute box for one output or program (PipeWire)."""
+    row = Gtk.Box(spacing=10)
+    try:
+        vol, muted = sound.get_volume(target)
+    except sound.SoundError:
+        vol, muted = 0.0, False
+    scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+    scale.set_value(round(min(vol, 1.0) * 100))
+    scale.set_hexpand(True)
+    mute = Gtk.CheckButton(label="Mute")
+    mute.set_active(muted)
+
+    def apply(*_):
+        try:
+            sound.set_volume(target, scale.get_value() / 100)
+            sound.set_mute(target, mute.get_active())
+        except sound.SoundError:
+            pass
+
+    scale.connect("value-changed", apply)
+    mute.connect("toggled", apply)
+    lab = theme.label(title, "cidint-key")
+    lab.set_size_request(180, -1)
+    row.pack_start(lab, False, False, 0)
+    row.pack_start(scale, True, True, 0)
+    row.pack_start(mute, False, False, 0)
+    return row
+
+
 def sound_page(page, grid):
+    from cidint_desktop import sound
+    if not sound.available():
+        return alsa_sound_page(page, grid)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+
+    def fill(*_):
+        for c in box.get_children():
+            box.remove(c)
+        try:
+            outs, progs = sound.outputs(), sound.streams()
+        except sound.SoundError as e:
+            box.pack_start(theme.label(f"The sound server does not answer: {e}", "cidint-error", wrap=True),
+                           False, False, 0)
+            box.show_all()
+            return
+        box.pack_start(theme.label("Output", "cidint-key"), False, False, 0)
+        if not outs:
+            box.pack_start(theme.label("No output device. The computer may have no sound hardware, or no "
+                                       "driver for it (see cidint-soundcheck).", "cidint-error", wrap=True),
+                           False, False, 0)
+        first = None
+        for o in outs:
+            rb = Gtk.RadioButton.new_with_label_from_widget(
+                first, o["description"] + ("  (Bluetooth)" if o["bluetooth"] else ""))
+            first = first or rb
+            rb.set_active(o["default"])
+            rb.connect("toggled", lambda b, i=o["id"]: b.get_active() and _safe(sound.set_default, i))
+            box.pack_start(rb, False, False, 0)
+        if outs:
+            box.pack_start(_volume_row("Volume", sound.DEFAULT_SINK, sound), False, False, 0)
+        box.pack_start(theme.label("Programs playing sound", "cidint-key"), False, False, 6)
+        if not progs:
+            box.pack_start(theme.label("None at the moment.", "cidint-muted"), False, False, 0)
+        for p in progs:
+            box.pack_start(_volume_row(p["app"], p["id"], sound), False, False, 0)
+        test = Gtk.Button(label="Play test sound")
+        test.connect("clicked", lambda *_: subprocess.Popen(
+            ["pw-play", "/usr/share/cidint/sounds/test-chime.wav"]))
+        again = Gtk.Button(label="Refresh")
+        again.connect("clicked", fill)
+        row = Gtk.Box(spacing=8)
+        row.pack_start(test, False, False, 0)
+        row.pack_start(again, False, False, 0)
+        box.pack_start(row, False, False, 6)
+        box.show_all()
+
+    fill()
+    return page("Sound", box, theme.label("Each program has its own volume while it plays. Bluetooth "
+                                          "headphones appear as an output once connected (Bluetooth page).",
+                                          "cidint-muted", wrap=True))
+
+
+def _safe(func, *args):
+    try:
+        func(*args)
+    except Exception:  # shown again on the next refresh
+        pass
+    return False
+
+
+def bluetooth_page(page, grid):
+    from gi.repository import GLib
+
+    from cidint_desktop import bluetooth as bt
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+    status = theme.label("", "", wrap=True)
+    listbox = Gtk.ListBox()
+    power = Gtk.CheckButton(label="Bluetooth on")
+    state = {"adapter": None, "busy": False}
+
+    def ask_gtk(text):
+        """Called on the pairing thread: ask in the GTK thread and wait."""
+        import threading
+        ev, ans = threading.Event(), {}
+
+        def show():
+            d = Gtk.MessageDialog(transient_for=box.get_toplevel(), modal=True,
+                                  message_type=Gtk.MessageType.QUESTION,
+                                  buttons=Gtk.ButtonsType.YES_NO, text=text)
+            ans["ok"] = d.run() == Gtk.ResponseType.YES
+            d.destroy()
+            ev.set()
+            return False
+
+        GLib.idle_add(show)
+        ev.wait(120)
+        return ans.get("ok", False)
+
+    def ask_pin():
+        import threading
+        ev, ans = threading.Event(), {}
+
+        def show():
+            d = Gtk.Dialog(title="PIN for the device", transient_for=box.get_toplevel(), modal=True)
+            d.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "OK", Gtk.ResponseType.OK)
+            e = Gtk.Entry(activates_default=True)
+            d.set_default_response(Gtk.ResponseType.OK)
+            d.get_content_area().add(e)
+            d.show_all()
+            ans["pin"] = e.get_text() if d.run() == Gtk.ResponseType.OK else ""
+            d.destroy()
+            ev.set()
+            return False
+
+        GLib.idle_add(show)
+        ev.wait(120)
+        return ans.get("pin", "")
+
+    def act(func, *args, then="Done."):
+        status.set_text("Working…")
+        theme.run_async(lambda: func(*args),
+                        lambda r, e: (status.set_text(f"Failed: {e}") if e else status.set_text(then), refresh()))
+
+    def fill(devs):
+        for c in listbox.get_children():
+            listbox.remove(c)
+        for d in devs:
+            row = Gtk.Box(spacing=12, margin=6)
+            st = "connected" if d["connected"] else ("paired" if d["paired"] else "found")
+            row.pack_start(theme.label(d["name"], "cidint-ok" if d["connected"] else ""), True, True, 0)
+            row.pack_start(theme.label(f"{st} · {d['kind'] or 'device'}", "cidint-muted"), False, False, 0)
+            if not d["paired"]:
+                b = Gtk.Button(label="Pair")
+                b.connect("clicked", lambda _b, p=d["path"]: act(bt.pair, p, ask_gtk, ask_pin, then="Paired."))
+                row.pack_start(b, False, False, 0)
+            elif d["connected"]:
+                b = Gtk.Button(label="Disconnect")
+                b.connect("clicked", lambda _b, p=d["path"]: act(bt.disconnect, p))
+                row.pack_start(b, False, False, 0)
+            else:
+                b = Gtk.Button(label="Connect")
+                b.connect("clicked", lambda _b, p=d["path"]: act(bt.connect, p, then="Connected."))
+                row.pack_start(b, False, False, 0)
+            if d["paired"]:
+                f = Gtk.Button(label="Forget")
+                f.connect("clicked", lambda _b, p=d["path"]: act(bt.remove, p))
+                row.pack_start(f, False, False, 0)
+            listbox.add(row)
+        listbox.show_all()
+
+    def refresh(*_):
+        def work():
+            a = bt.adapters()
+            return (a[0], bt.devices(a[0]["path"])) if a else (None, [])
+
+        def done(res, err):
+            if err:
+                status.set_text(f"Bluetooth is not available: {err}")
+                return
+            a, devs = res
+            state["adapter"] = a
+            state["busy"] = True
+            power.set_active(bool(a and a["powered"]))
+            state["busy"] = False
+            power.set_sensitive(bool(a))
+            if not a:
+                status.set_text("No Bluetooth controller found. The computer may have none, no driver for it, "
+                                "or a switch turned it off.")
+            fill(devs)
+
+        theme.run_async(work, done)
+
+    def on_power(b):
+        if not state["busy"] and state["adapter"]:
+            act(bt.set_powered, state["adapter"]["path"], b.get_active())
+
+    def on_scan(*_):
+        a = state["adapter"]
+        if not a:
+            return
+        status.set_text("Looking for devices for 12 seconds…")
+
+        def work():
+            if not a["powered"]:
+                bt.set_powered(a["path"], True)
+            bt.start_discovery(a["path"])
+            import time
+            time.sleep(12)
+            bt.stop_discovery(a["path"])
+
+        theme.run_async(work, lambda r, e: (status.set_text(f"Search failed: {e}" if e else ""), refresh()))
+
+    power.connect("toggled", on_power)
+    scan = Gtk.Button(label="Search for devices")
+    scan.connect("clicked", on_scan)
+    box.pack_start(power, False, False, 0)
+    box.pack_start(status, False, False, 0)
+    box.pack_start(listbox, False, False, 0)
+    box.pack_start(scan, False, False, 0)
+    refresh()
+    return page("Bluetooth", box, theme.label("Put the device in pairing mode, search, then Pair. Compare the "
+                                              "code it shows before you confirm.", "cidint-muted", wrap=True))
+
+
+def alsa_sound_page(page, grid):
     cards = [line.strip() for line in _read("/proc/asound/cards").splitlines() if re.match(r"\s*\d+ \[", line)]
     if not cards:
         return page("Sound", theme.label("No sound device found. The computer may have none, or no driver "

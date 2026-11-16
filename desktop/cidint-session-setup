@@ -16,7 +16,7 @@ DRIVER=""
 for c in /sys/class/drm/card*/device/driver; do
     [ -e "$c" ] || continue
     d=$(basename "$(readlink -f "$c")")
-    case "$d" in i915|xe|amdgpu|radeon|nouveau|vmwgfx) DRIVER=$d; break ;; esac
+    case "$d" in i915|xe|amdgpu|radeon|nouveau|vmwgfx|virtio_gpu) DRIVER=$d; break ;; esac
 done
 case "$CHOICE" in
     gl) RENDERER=gl; WHY="OpenGL (chosen in Settings${DRIVER:+, driver $DRIVER})" ;;
@@ -39,6 +39,15 @@ for app in /data/apps/store/*/app.ini; do
     printf '\n[launcher]\n' >> "$CONF"
     grep -E '^(icon|path)=' "$app" >> "$CONF"
 done
+
+# Sound server: programs of this session play through PipeWire (one
+# stream each, with its own volume). A ~/.asoundrc the user wrote is kept.
+MARK="# written by CIDINT OS (cidint-session-setup)"
+if [ -e /usr/lib/alsa-lib/libasound_module_pcm_pipewire.so ] && command -v pipewire >/dev/null 2>&1; then
+    if [ ! -e "$HOME/.asoundrc" ] || grep -qxF "$MARK" "$HOME/.asoundrc"; then
+        printf '%s\n' "$MARK" 'pcm.!default { type pipewire }' 'ctl.!default { type pipewire }' > "$HOME/.asoundrc"
+    fi
+fi
 
 # Sound: unmuted at a moderate volume the first time.
 if [ ! -e "$HOME/.config/cidint/sound-initialised" ] && command -v amixer >/dev/null 2>&1; then

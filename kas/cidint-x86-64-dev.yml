@@ -12,6 +12,11 @@
 # private key. CI creates a throwaway development key per run. Release
 # builds must use the separate, offline production key. Without a key the
 # images refuse every update.
+#
+# Secure Boot: CIDINT_SB_KEY_DIR names a directory with the boot keys
+# (see scripts/make-boot-keys.sh); the build signs GRUB, the kernel and the
+# boot menu with them. Without it the boot files are unsigned.
+# CIDINT_STORE_URL: default software source written into the images.
 header:
   version: 14
 
@@ -27,6 +32,10 @@ target:
 env:
   CIDINT_UPDATE_PUBKEY: ""
   CIDINT_APPS_PUBKEY: ""
+  CIDINT_SB_KEY_DIR: ""
+  CIDINT_SB_KEY_ID: ""
+  CIDINT_STORE_URL: ""
+  CIDINT_APPS_RELEASE_PUBKEY: ""
 
 repos:
   # This repository (the directory containing kas/).
@@ -57,6 +66,8 @@ repos:
       meta-oe:
       meta-python:
       meta-networking:
+      # PipeWire and WirePlumber (sound server of the Desktop Edition).
+      meta-multimedia:
 
 local_conf_header:
   cidint-dev: |

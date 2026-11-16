@@ -1,6 +1,6 @@
 # CIDINT OS disk layout (GPT, UEFI).
 #
-#   1  esp          EFI system partition, boot loader and kernel
+#   1  esp          EFI system partition, boot loader and kernels
 #   2  system-a     read-only system image (active)
 #   3  system-b     reserved for A/B updates (empty until the update
 #                   manager exists)
@@ -9,9 +9,12 @@
 #
 # The system slots have a fixed size so a later image always fits the
 # other slot. The data partition is created once, at install time.
-part /boot --source bootimg-efi --sourceparams="loader=${EFI_PROVIDER}" --label esp --active --align 1024 --use-uuid --fixed-size 128M
+# The ESP holds the boot files of recipes-bsp/cidint-boot (IMAGE_BOOT_FILES):
+# GRUB, the boot menu and the slot A kernel, each with its signature when
+# the build has a boot key.
+part /boot --source bootimg-partition --fstype=vfat --label esp --active --align 1024 --use-uuid --fixed-size 128M --part-type C12A7328-F81F-11D2-BA4B-00A0C93EC93B
 part / --source rootfs --fstype=ext4 --label system-a --align 1024 --use-uuid --fixed-size 2560M
 part --fstype=ext4 --label system-b --align 1024 --fixed-size 2560M
 part /data --fstype=ext4 --label cidint-data --align 1024 --use-uuid --size 1024M
 
-bootloader --ptable gpt --timeout=3 --append=" rootfstype=ext4 ro cidint.mode=installed ${APPEND}"
+bootloader --ptable gpt

@@ -149,14 +149,41 @@ cmd_install() {
     awk -F: -v OFS=: 'NR == FNR { if ($2 ~ /^\$/) h[$1] = $2; next } ($1 in h) { $2 = h[$1] } { print }'         /etc/shadow "$WORK/new/etc/shadow" > "$WORK/shadow.new"
     cat "$WORK/shadow.new" > "$WORK/new/etc/shadow"
     rm -f "$WORK/shadow.new"
+    # The kernel to start the new system with: the one inside the (signed)
+    # system image, with its boot signature, when the image has one.
+    NEWBOOT="$WORK/new/usr/share/cidint/boot"
+    KERNEL="$DIR/bzImage" KSIG=""
+    if [ -f "$NEWBOOT/bzImage" ]; then
+        cp "$NEWBOOT/bzImage" "$WORK/kernel" || fail "could not read the kernel of the new system"
+        KERNEL="$WORK/kernel"
+        if [ -f "$NEWBOOT/bzImage.sig" ]; then
+            cp "$NEWBOOT/bzImage.sig" "$WORK/kernel.sig" || fail "could not read the kernel signature"
+            KSIG="$WORK/kernel.sig"
+        fi
+    fi
     sync
     umount "$WORK/new"
     trap - EXIT
     e2fsck -fn "$DEV" >/dev/null 2>&1 || fail "slot $NEW failed its final filesystem check"
+    # A system whose boot loader checks signatures would not start an
+    # unsigned kernel; say so now instead of failing at the next start.
+    if [ -f /boot/EFI/BOOT/grub.cfg.sig ] && [ -z "$KSIG" ]; then
+        rm -f "$WORK/kernel"
+        refuse "this computer checks boot signatures, and the update carries no signed kernel"
+    fi
 
-    cp "$DIR/bzImage" "/boot/bzImage-$NEW.new" || fail "could not copy the kernel"
+    cp "$KERNEL" "/boot/bzImage-$NEW.new" || fail "could not copy the kernel"
+    if [ -n "$KSIG" ]; then
+        cp "$KSIG" "/boot/bzImage-$NEW.sig.new" || fail "could not copy the kernel signature"
+    fi
     sync
     mv "/boot/bzImage-$NEW.new" "/boot/bzImage-$NEW"
+    if [ -n "$KSIG" ]; then
+        mv "/boot/bzImage-$NEW.sig.new" "/boot/bzImage-$NEW.sig"
+    else
+        rm -f "/boot/bzImage-$NEW.sig"
+    fi
+    rm -f "$WORK/kernel" "$WORK/kernel.sig"
     sync
 
     grub-editenv "$ENVFILE" unset tried rolled_back

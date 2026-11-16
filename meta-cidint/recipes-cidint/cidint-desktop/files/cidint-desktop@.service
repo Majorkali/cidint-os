@@ -13,7 +13,7 @@ ConditionKernelCommandLine=!cidint.nogui
 # The compositor and the programs of the session run as the user, not root.
 User=%i
 Group=%i
-SupplementaryGroups=seat video input render
+SupplementaryGroups=seat video input render audio bluetooth
 RuntimeDirectory=cidint-session-%i
 RuntimeDirectoryMode=0700
 Environment=XDG_RUNTIME_DIR=/run/cidint-session-%i
@@ -24,5 +24,6 @@ Environment=GDK_BACKEND=wayland
 # /home lives on the data volume; create this user's directory there once.
 ExecStartPre=+/bin/sh -c 'mkdir -p /home/%i && chown %i:%i /home/%i && chmod 700 /home/%i'
 ExecStartPre=/usr/lib/cidint/desktop/cidint-session-setup
-ExecStart=/usr/bin/weston --config=/run/cidint-session-%i/weston.ini
+# Sound server (PipeWire, WirePlumber), then the compositor.
+ExecStart=/usr/lib/cidint/desktop/cidint-session
 ExecStopPost=+/usr/lib/cidint/desktop/cidint-after-session

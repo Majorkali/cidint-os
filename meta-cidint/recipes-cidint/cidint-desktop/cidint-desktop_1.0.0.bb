@@ -3,16 +3,17 @@ DESCRIPTION = "A Wayland desktop on Weston (OpenGL through Mesa where the \
 graphics hardware has a driver, software rendering otherwise). Installed \
 systems start at a login screen; live media start the session directly. \
 Programs written for CIDINT OS: login screen, Files, Settings (with Wi-Fi, \
-sound and display), Assistant, Media, Browser (WebKitGTK) and Software \
+sound, Bluetooth and display), Assistant, Media, Browser (WebKitGTK) and Software \
 (signed app store). Privileged steps go through cidint-authd."
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 FILESEXTRAPATHS:prepend := "${CIDINT_REPO}/desktop:"
 PROGRAMS = "cidint-authd cidint-authctl cidint-greeter cidint-files cidint-settings cidint-assistant \
-            cidint-media cidint-browser cidint-software cidint-store cidint-wifi \
+            cidint-media cidint-browser cidint-software cidint-store cidint-wifi cidint-bluetooth \
+            cidint-gpucheck cidint-soundcheck cidint-session \
             cidint-session-setup cidint-after-session"
-MODULES = "__init__ authclient fileops theme wifi store settings_hw"
+MODULES = "__init__ authclient fileops theme wifi bluetooth sound store settings_hw"
 SRC_URI = "\
     file://weston.ini \
     file://weston-greeter.ini \
@@ -23,6 +24,8 @@ SRC_URI = "\
     file://cidint-desktop@.service \
     file://cidint-greeter.service \
     file://cidint-authd.service \
+    file://cidint-bluetooth.conf \
+    file://wireplumber-cidint.conf \
     file://browser/start.html \
     ${@' '.join('file://' + p for p in d.getVar('PROGRAMS').split())} \
     ${@' '.join('file://cidint_desktop/' + m + '.py' for m in d.getVar('MODULES').split())} \
@@ -39,14 +42,18 @@ SYSTEMD_SERVICE:${PN} = "seatd.service cidint-authd.service cidint-greeter.servi
 # Trusted key of the software store (same scheme as update keys: only the
 # public key, handed in by the build as the base64 line of a PEM file).
 CIDINT_APPS_PUBKEY ??= ""
+CIDINT_STORE_URL ??= ""
+# Public key of the published catalogue (release key), trusted besides the
+# build's own key.
+CIDINT_APPS_RELEASE_PUBKEY ??= ""
 
 USERADD_PACKAGES = "${PN}"
-GROUPADD_PARAM:${PN} = "-r seat; -r render; -r cidint-desktop; -r netdev"
+GROUPADD_PARAM:${PN} = "-r seat; -r render; -r cidint-desktop; -r netdev; -r bluetooth"
 # cidint: the desktop user (password set at installation or first start).
 # cidint-greeter: runs the login screen; no shell, no home.
 USERADD_PARAM:${PN} = "\
     --uid 1000 --user-group --home-dir /home/cidint --no-create-home --shell /bin/sh \
-        -G seat,video,input,render,audio,netdev,cidint-desktop cidint; \
+        -G seat,video,input,render,audio,netdev,bluetooth,cidint-desktop cidint; \
     --system --user-group --home-dir /nonexistent --no-create-home --shell /sbin/nologin \
         -G seat,video,input,render cidint-greeter \
 "
@@ -70,7 +77,8 @@ do_install() {
     done
     install -m 0644 ${WORKDIR}/cidint_desktop/*.py ${D}${LIBDIR}/cidint_desktop/
     for p in cidint-authctl cidint-greeter cidint-files cidint-settings cidint-assistant cidint-media \
-             cidint-browser cidint-software cidint-store cidint-wifi; do
+             cidint-browser cidint-software cidint-store cidint-wifi cidint-bluetooth \
+             cidint-gpucheck cidint-soundcheck; do
         ln -sf ${LIBDIR}/$p ${D}${bindir}/$p
     done
 
@@ -82,9 +90,24 @@ do_install() {
     else
         bbwarn "CIDINT_APPS_PUBKEY is not set: the software store will refuse every catalogue"
     fi
+    if [ -n "${CIDINT_APPS_RELEASE_PUBKEY}" ]; then
+        printf '%s\n' '-----BEGIN PUBLIC KEY-----' '${CIDINT_APPS_RELEASE_PUBKEY}' '-----END PUBLIC KEY-----' \
+            > ${D}${datadir}/cidint/keys/apps/release.pem
+    fi
+    # Default software source (a release build points it at the published
+    # catalogue; users can choose another one in Software).
+    if [ -n "${CIDINT_STORE_URL}" ]; then
+        printf '%s\n' '${CIDINT_STORE_URL}' > ${D}${sysconfdir}/cidint/store-source
+    fi
     install -d ${D}${nonarch_libdir}/tmpfiles.d
     printf '%s\n' 'd /data/apps/store 0755 root root -' 'd /data/config/iwd 0700 root root -' \
         > ${D}${nonarch_libdir}/tmpfiles.d/cidint-desktop.conf
+
+    # Bluetooth: desktop users (group bluetooth) may talk to BlueZ.
+    install -d ${D}${sysconfdir}/dbus-1/system.d ${D}${datadir}/wireplumber/wireplumber.conf.d
+    install -m 0644 ${WORKDIR}/cidint-bluetooth.conf ${D}${sysconfdir}/dbus-1/system.d/cidint-bluetooth.conf
+    # Sound server: WirePlumber settings for sessions without logind seats.
+    install -m 0644 ${WORKDIR}/wireplumber-cidint.conf ${D}${datadir}/wireplumber/wireplumber.conf.d/90-cidint.conf
 
     # Wi-Fi (iwd): addresses by DHCP from iwd itself, names through
     # systemd-resolved; known networks kept on the data volume.
@@ -96,7 +119,7 @@ do_install() {
         > ${D}${systemd_system_unitdir}/iwd.service.d/cidint.conf
 }
 
-FILES:${PN} += "${datadir}/cidint ${LIBDIR} ${systemd_system_unitdir} ${nonarch_libdir}/tmpfiles.d \
+FILES:${PN} += "${datadir}/cidint ${datadir}/wireplumber ${sysconfdir}/dbus-1 ${LIBDIR} ${systemd_system_unitdir} ${nonarch_libdir}/tmpfiles.d \
                 ${localstatedir}/lib/iwd"
 
 RDEPENDS:${PN} = "\
@@ -108,5 +131,7 @@ RDEPENDS:${PN} = "\
     gstreamer1.0 gstreamer1.0-plugins-base-meta gstreamer1.0-plugins-good-meta \
     alsa-utils-amixer alsa-utils-aplay \
     iwd wireless-regdb-static \
+    pipewire pipewire-alsa pipewire-tools wireplumber bluez5 \
+    libegl-mesa libgles2-mesa libgbm \
     mesa-megadriver \
 "

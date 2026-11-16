@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""cidint-gpucheck - does OpenGL work on this computer, and on what?
+
+  cidint-gpucheck [--json]
+
+For each graphics device (/dev/dri/renderD*) it creates an OpenGL ES
+context through EGL and GBM (Mesa), renders a colour off-screen, reads it
+back and checks it, then measures how many pixels per second the device
+fills. It prints the kernel driver, the OpenGL renderer and whether the
+work ran on a graphics processor or in software (llvmpipe). Nothing is
+changed. Run it as a member of the group render (any desktop user) or root.
+
+Exit codes: 0 a graphics processor renders correctly, 3 only software
+rendering works, 1 OpenGL does not work, 2 usage."""
+import ctypes
+import glob
+import json
+import os
+import sys
+import time
+
+EGL_NONE = 0x3038
+EGL_PLATFORM_GBM_KHR = 0x31D7
+EGL_PLATFORM_SURFACELESS_MESA = 0x31DD
+EGL_OPENGL_ES_API = 0x30A0
+EGL_CONTEXT_CLIENT_VERSION = 0x3098
+GL_VENDOR, GL_RENDERER, GL_VERSION = 0x1F00, 0x1F01, 0x1F02
+GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST = 0x0DE1, 0x2801, 0x2600
+GL_RGBA, GL_UNSIGNED_BYTE = 0x1908, 0x1401
+GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER_COMPLETE = 0x8D40, 0x8CE0, 0x8CD5
+GL_COLOR_BUFFER_BIT = 0x4000
+SIZE = 1024
+SOFTWARE = ("llvmpipe", "softpipe", "swrast", "software")
+
+
+def load():
+    egl = ctypes.CDLL("libEGL.so.1")
+    gl = ctypes.CDLL("libGLESv2.so.2")
+    try:
+        gbm = ctypes.CDLL("libgbm.so.1")
+    except OSError:
+        gbm = None
+    egl.eglGetPlatformDisplay.restype = ctypes.c_void_p
+    egl.eglGetPlatformDisplay.argtypes = [ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+    egl.eglInitialize.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    egl.eglBindAPI.argtypes = [ctypes.c_uint]
+    egl.eglCreateContext.restype = ctypes.c_void_p
+    egl.eglCreateContext.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    egl.eglMakeCurrent.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    egl.eglDestroyContext.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    egl.eglTerminate.argtypes = [ctypes.c_void_p]
+    egl.eglQueryString.restype = ctypes.c_char_p
+    egl.eglQueryString.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    gl.glGetString.restype = ctypes.c_char_p
+    gl.glGetString.argtypes = [ctypes.c_uint]
+    gl.glClearColor.argtypes = [ctypes.c_float] * 4
+    if gbm is not None:
+        gbm.gbm_create_device.restype = ctypes.c_void_p
+        gbm.gbm_create_device.argtypes = [ctypes.c_int]
+        gbm.gbm_device_destroy.argtypes = [ctypes.c_void_p]
+    return egl, gl, gbm
+
+
+def driver_of(node: str) -> str:
+    link = f"/sys/class/drm/{os.path.basename(node)}/device/driver"
+    return os.path.basename(os.path.realpath(link)) if os.path.exists(link) else "unknown"
+
+
+def test(egl, gl, gbm, node: str | None) -> dict:
+    r = {"device": node or "(none: surfaceless)", "driver": driver_of(node) if node else "-"}
+    fd, dev = -1, None
+    try:
+        if node:
+            if gbm is None:
+                raise RuntimeError("libgbm is not installed")
+            fd = os.open(node, os.O_RDWR | os.O_CLOEXEC)
+            dev = gbm.gbm_create_device(fd)
+            if not dev:
+                raise RuntimeError("GBM could not open the device")
+            dpy = egl.eglGetPlatformDisplay(EGL_PLATFORM_GBM_KHR, dev, None)
+        else:
+            dpy = egl.eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, None, None)
+        if not dpy or not egl.eglInitialize(dpy, None, None):
+            raise RuntimeError("EGL could not be initialised")
+        try:
+            egl.eglBindAPI(EGL_OPENGL_ES_API)
+            attrs = (ctypes.c_int * 3)(EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE)
+            ctx = egl.eglCreateContext(dpy, None, None, attrs)
+            if not ctx or not egl.eglMakeCurrent(dpy, None, None, ctx):
+                raise RuntimeError("no OpenGL ES 2 context (EGL_KHR_surfaceless_context missing?)")
+            r["vendor"] = (gl.glGetString(GL_VENDOR) or b"").decode(errors="replace")
+            r["renderer"] = (gl.glGetString(GL_RENDERER) or b"").decode(errors="replace")
+            r["version"] = (gl.glGetString(GL_VERSION) or b"").decode(errors="replace")
+            tex, fbo = ctypes.c_uint(), ctypes.c_uint()
+            gl.glGenTextures(1, ctypes.byref(tex))
+            gl.glBindTexture(GL_TEXTURE_2D, tex)
+            gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+            gl.glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, SIZE, SIZE, 0, GL_RGBA, GL_UNSIGNED_BYTE, None)
+            gl.glGenFramebuffers(1, ctypes.byref(fbo))
+            gl.glBindFramebuffer(GL_FRAMEBUFFER, fbo)
+            gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0)
+            if gl.glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
+                raise RuntimeError("off-screen framebuffer is incomplete")
+            gl.glClearColor(1.0, 0.0, 1.0, 1.0)
+            gl.glClear(GL_COLOR_BUFFER_BIT)
+            px = (ctypes.c_ubyte * 4)()
+            gl.glReadPixels(SIZE // 2, SIZE // 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px)
+            r["readback"] = list(px)
+            r["render_ok"] = list(px) == [255, 0, 255, 255]
+            frames = 200
+            t0 = time.monotonic()
+            for i in range(frames):
+                gl.glClearColor((i % 7) / 7, 0.5, 0.25, 1.0)
+                gl.glClear(GL_COLOR_BUFFER_BIT)
+            gl.glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px)  # waits for the work
+            gl.glFinish()
+            dt = max(time.monotonic() - t0, 1e-6)
+            r["fill_mpixels_per_s"] = round(frames * SIZE * SIZE / dt / 1e6, 1)
+            egl.eglMakeCurrent(dpy, None, None, None)
+            egl.eglDestroyContext(dpy, ctx)
+        finally:
+            egl.eglTerminate(dpy)
+        low = r["renderer"].lower()
+        r["kind"] = ("software" if any(s in low for s in SOFTWARE)
+                     else "virtual GPU (rendered by the host)" if "virgl" in low
+                     else "graphics processor")
+    except (RuntimeError, OSError, AttributeError) as e:
+        r["error"] = str(e)
+        r["render_ok"] = False
+    finally:
+        if dev:
+            gbm.gbm_device_destroy(dev)
+        if fd >= 0:
+            os.close(fd)
+    return r
+
+
+def main(argv) -> int:
+    if argv not in ([], ["--json"]):
+        print(__doc__.split("\n\n", 1)[1], file=sys.stderr)
+        return 2
+    try:
+        egl, gl, gbm = load()
+    except OSError as e:
+        print(f"cidint-gpucheck: OpenGL libraries (Mesa) are missing: {e}", file=sys.stderr)
+        return 1
+    nodes = sorted(glob.glob("/dev/dri/renderD*"))
+    results = [test(egl, gl, gbm, n) for n in nodes] or [test(egl, gl, gbm, None)]
+    if argv == ["--json"]:
+        print(json.dumps(results, indent=2))
+    else:
+        for r in results:
+            print(f"device    : {r['device']} (kernel driver {r['driver']})")
+            if "error" in r:
+                print(f"result    : OpenGL does not work: {r['error']}")
+            else:
+                print(f"renderer  : {r['renderer']} ({r['vendor']})")
+                print(f"version   : {r['version']}")
+                print(f"runs on   : {r['kind']}")
+                print(f"test image: {'correct' if r['render_ok'] else 'WRONG ' + str(r['readback'])}")
+                print(f"fill rate : {r['fill_mpixels_per_s']} million pixels per second")
+            print()
+    ok = [r for r in results if r.get("render_ok")]
+    if any(r["kind"] != "software" for r in ok):
+        return 0
+    return 3 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

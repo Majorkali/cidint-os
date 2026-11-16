@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""cidint-bluetooth - Bluetooth from the command line (the code Settings uses).
+
+  cidint-bluetooth adapters            controllers and whether they are on
+  cidint-bluetooth power on|off        switch the first controller on or off
+  cidint-bluetooth scan [SECONDS]      look for devices (default 10 s)
+  cidint-bluetooth devices             known and found devices
+  cidint-bluetooth pair ADDRESS        pair; asks you to confirm the code
+  cidint-bluetooth connect ADDRESS
+  cidint-bluetooth disconnect ADDRESS
+  cidint-bluetooth forget ADDRESS      remove the pairing
+
+Run as root or as a member of the group bluetooth.
+Exit codes: 0 ok, 1 failed, 2 usage, 3 no Bluetooth controller."""
+import sys
+import time
+
+sys.path.insert(0, "/usr/lib/cidint/desktop")
+from cidint_desktop import bluetooth as bt  # noqa: E402
+
+
+def usage() -> int:
+    print(__doc__.split("\n\n", 1)[1], file=sys.stderr)
+    return 2
+
+
+def first_adapter() -> dict:
+    a = bt.adapters()
+    if not a:
+        print("cidint-bluetooth: no Bluetooth controller found (none fitted, no driver, or switched off "
+              "by a hardware switch)", file=sys.stderr)
+        sys.exit(3)
+    return a[0]
+
+
+def by_address(addr: str) -> str:
+    for d in bt.devices():
+        if d["address"].lower() == addr.lower():
+            return d["path"]
+    raise bt.BluetoothError(f"no device {addr} is known; scan first")
+
+
+def ask(text: str) -> bool:
+    print(text, end=" [y/N] ", flush=True)
+    return sys.stdin.readline().strip().lower() in ("y", "yes")
+
+
+def ask_pin() -> str:
+    print("PIN or passkey shown by or chosen for the device: ", end="", flush=True)
+    return sys.stdin.readline().strip()
+
+
+def main(argv) -> int:
+    if not argv:
+        return usage()
+    op, args = argv[0], argv[1:]
+    try:
+        if op == "adapters" and not args:
+            for a in bt.adapters():
+                print(f"{a['path']} {a['address']} {a['name']} powered={'yes' if a['powered'] else 'no'}")
+            return 0
+        if op == "power" and args in (["on"], ["off"]):
+            bt.set_powered(first_adapter()["path"], args[0] == "on")
+            print(f"powered {args[0]}")
+            return 0
+        if op == "scan" and len(args) <= 1:
+            a = first_adapter()
+            if not a["powered"]:
+                bt.set_powered(a["path"], True)
+            bt.start_discovery(a["path"])
+            time.sleep(int(args[0]) if args else 10)
+            bt.stop_discovery(a["path"])
+            op, args = "devices", []
+        if op == "devices" and not args:
+            for d in bt.devices():
+                state = "connected" if d["connected"] else ("paired" if d["paired"] else "found")
+                print(f"{d['address']} {state:9} {d['kind'] or '-':16} {d['name']}")
+            return 0
+        if op in ("pair", "connect", "disconnect", "forget") and len(args) == 1:
+            path = by_address(args[0])
+            if op == "pair":
+                bt.pair(path, ask, ask_pin)
+                print("paired")
+            elif op == "connect":
+                bt.connect(path)
+                print("connected")
+            elif op == "disconnect":
+                bt.disconnect(path)
+                print("disconnected")
+            else:
+                bt.remove(path)
+                print("forgotten")
+            return 0
+        return usage()
+    except bt.BluetoothError as e:
+        print(f"cidint-bluetooth: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

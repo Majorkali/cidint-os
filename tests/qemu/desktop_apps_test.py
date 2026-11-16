@@ -159,11 +159,25 @@ def main() -> int:
             rc, ctl = vm.run(as_user("amixer scontrols"))
             step("sound: the mixer has volume controls the desktop user may change", rc == 0 and "'" in ctl, ctl)
             before = wav.stat().st_size if wav.exists() else 0
-            rc, out = vm.run(as_user("aplay -q /usr/share/cidint/sounds/test-chime.wav"), timeout=60)
+            rc, procs = vm.run(f"pgrep -u {user} -x pipewire && pgrep -u {user} -x wireplumber")
+            step("sound: the session runs the sound server (PipeWire and WirePlumber)", rc == 0, procs)
+            rc, out = vm.run(as_user(f"{env} aplay -q /usr/share/cidint/sounds/test-chime.wav"), timeout=60)
             time.sleep(2)
             peak = wav_peak(wav, before) if wav.exists() else 0
-            step("sound: the test sound comes out of the sound card (recorded on the host)",
+            step("sound: the test sound goes through the sound server to the sound card (recorded on the host)",
                  rc == 0 and peak > 1000, f"rc={rc} {out} peak={peak}")
+            # Per-program volume: a program playing appears as its own stream.
+            vm.run(as_user(f"{env} gst-launch-1.0 -q audiotestsrc freq=440 num-buffers=900 ! audioconvert "
+                           "! alsasink >/tmp/tone.log 2>&1 &"))
+            time.sleep(4)
+            probe = ("import sys; sys.path.insert(0, '/usr/lib/cidint/desktop'); "
+                     "from cidint_desktop import sound; s = sound.streams(); print('streams', len(s)); "
+                     "sound.set_volume(s[0]['id'], 0.3); print('volume %.2f' % sound.get_volume(s[0]['id'])[0]); "
+                     "print('outputs', len(sound.outputs()))")
+            rc, out = vm.run(as_user(f"{env} python3 -c \\\"{probe}\\\""), timeout=60)
+            step("sound: each playing program has its own volume, which Settings can change",
+                 rc == 0 and "volume 0.30" in out and "outputs 0" not in out, out)
+            vm.run("pkill -f audiotestsrc; sleep 1")
 
             # ---- media player ----------------------------------------------
             rc, out = vm.run(as_user(

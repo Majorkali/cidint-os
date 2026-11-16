@@ -62,6 +62,56 @@ def set_source(url: str):
     os.replace(tmp, SOURCE_LOCAL)
 
 
+MEDIA = "/run/cidint-store-media"
+
+
+def removable_sources() -> list:
+    """Software sources on removable media (USB sticks, SD cards): a folder
+    holding index.json at the top of a partition, or in cidint-apps/.
+    Partitions that are not mounted yet are mounted read-only, without
+    device files, set-user-ID programs or execution, under MEDIA."""
+    found = []
+    mounts = {}
+    with open("/proc/mounts", encoding="utf-8") as f:
+        for line in f:
+            dev, mnt = line.split()[:2]
+            mounts.setdefault(os.path.realpath(dev), mnt.replace("\\040", " "))
+    for disk in sorted(os.listdir("/sys/block")):
+        try:
+            with open(f"/sys/block/{disk}/removable", encoding="utf-8") as f:
+                removable = f.read().strip() == "1"
+        except OSError:
+            continue
+        usb = "/usb" in os.path.realpath(f"/sys/block/{disk}")
+        if not (removable or usb):
+            continue
+        parts = [p for p in os.listdir(f"/sys/block/{disk}") if p.startswith(disk)] or [disk]
+        for part in sorted(parts):
+            dev = f"/dev/{part}"
+            mnt = mounts.get(dev)
+            if not mnt:
+                mnt = os.path.join(MEDIA, part)
+                os.makedirs(mnt, exist_ok=True)
+                r = subprocess.run(["mount", "-o", "ro,nosuid,nodev,noexec", dev, mnt], capture_output=True)
+                if r.returncode != 0:
+                    continue
+            for cand in (mnt, os.path.join(mnt, "cidint-apps")):
+                if os.path.isfile(os.path.join(cand, "index.json")):
+                    found.append(cand)
+    return found
+
+
+def allowed_user_source(url: str, home: str) -> bool:
+    """Sources a desktop user may choose: web addresses, removable media,
+    and folders in the user's own home. Catalogues are signature-checked
+    whatever the source, so this only limits what root reads on request."""
+    if url.startswith(("https://", "http://")):
+        return True
+    path = os.path.realpath(url[7:] if url.startswith("file://") else url)
+    roots = [MEDIA, "/media", "/run/media", "/mnt", home]
+    return any(path == r or path.startswith(r.rstrip("/") + "/") for r in roots if r)
+
+
 def _fetch(name: str, limit: int) -> bytes:
     src = source()
     if not src:

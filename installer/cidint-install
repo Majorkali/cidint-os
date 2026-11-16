@@ -401,9 +401,35 @@ umount "$WORK/root"
 say "installing the boot loader"
 mount "${P}1" "$WORK/esp"
 mkdir -p "$WORK/esp/EFI/BOOT"
-cp "$SRC/EFI/BOOT/bootx64.efi" "$WORK/esp/EFI/BOOT/bootx64.efi"
-# One kernel per system slot: an update brings its own kernel.
-cp "$SRC/bzImage" "$WORK/esp/bzImage-a"
+# Boot files built (and, with a boot key, signed) for installed systems:
+# GRUB, a boot menu that finds the slots itself, and the kernel. They come
+# with the system that is running, which is the system being installed.
+BOOTFILES=/usr/share/cidint/boot
+if [ -f "$BOOTFILES/EFI/BOOT/bootx64.efi" ] && [ -f "$BOOTFILES/EFI/BOOT/grub.cfg" ] && [ -f "$BOOTFILES/bzImage" ]; then
+    cp "$BOOTFILES/EFI/BOOT/bootx64.efi" "$BOOTFILES/EFI/BOOT/grub.cfg" "$WORK/esp/EFI/BOOT/"
+    cp "$BOOTFILES/bzImage" "$WORK/esp/bzImage-a"
+    if [ -f "$BOOTFILES/EFI/BOOT/grub.cfg.sig" ] && [ -f "$BOOTFILES/bzImage.sig" ]; then
+        cp "$BOOTFILES/EFI/BOOT/grub.cfg.sig" "$WORK/esp/EFI/BOOT/"
+        cp "$BOOTFILES/bzImage.sig" "$WORK/esp/bzImage-a.sig"
+        mkdir -p "$WORK/esp/EFI/cidint"
+        [ ! -f "$BOOTFILES/cidint-db.cer" ] || cp "$BOOTFILES/cidint-db.cer" "$WORK/esp/EFI/cidint/"
+        say "boot files are signed: Secure Boot can be used once the CIDINT key is enrolled (cidint-secureboot status)"
+        [ -z "$KARGS" ] || say "note: --kernel-args is ignored while boot signatures are checked"
+    else
+        say "boot files are not signed: Secure Boot must stay off on this computer"
+    fi
+    grub-editenv "$WORK/esp/EFI/BOOT/grubenv" create || fail "could not create the boot state file"
+    grub-editenv "$WORK/esp/EFI/BOOT/grubenv" set slot=a || fail "could not write the boot state file"
+    if [ -n "$KARGS" ]; then
+        grub-editenv "$WORK/esp/EFI/BOOT/grubenv" set "extra_args=$KARGS" || fail "could not write the boot state file"
+    fi
+    GENERATED_MENU=0
+else
+    cp "$SRC/EFI/BOOT/bootx64.efi" "$WORK/esp/EFI/BOOT/bootx64.efi"
+    # One kernel per system slot: an update brings its own kernel.
+    cp "$SRC/bzImage" "$WORK/esp/bzImage-a"
+    GENERATED_MENU=1
+fi
 UUID_B=$(blkid -o value -s PARTUUID "${P}3")
 [ -n "$UUID_B" ] || fail "could not read the identifier of the second system slot"
 CONSOLES=$(tr ' ' '\n' < /proc/cmdline | grep '^console=' | tr '\n' ' ' || true)
@@ -414,6 +440,7 @@ ARGS="rootwait rootfstype=ext4 ro cidint.mode=installed $CONSOLES $KARGS"
 #   tried  set by the boot loader when the trial slot has been started
 # A trial slot that was started but never confirmed is abandoned on the
 # next start and the committed slot is used again.
+if [ "$GENERATED_MENU" -eq 1 ]; then
 grub-editenv "$WORK/esp/EFI/BOOT/grubenv" create || fail "could not create the boot state file"
 grub-editenv "$WORK/esp/EFI/BOOT/grubenv" set slot=a || fail "could not write the boot state file"
 cat > "$WORK/esp/EFI/BOOT/grub.cfg" <<EOF
@@ -443,6 +470,7 @@ menuentry 'CIDINT OS (system slot B)' --id b {
     linux /bzImage-b root=PARTUUID=$UUID_B $ARGS cidint.slot=b
 }
 EOF
+fi
 # Legacy BIOS: GRUB's core goes into the BIOS boot partition and its
 # modules into /grub on the ESP; it reads the same menu as UEFI.
 say "installing the legacy BIOS boot loader"

@@ -1,0 +1,17 @@
+#!/bin/sh
+# cidint-session - the desktop session of one user: the sound server
+# (PipeWire with the WirePlumber session manager), then the compositor.
+# Started by cidint-desktop@USER.service; stopping the service ends all of it.
+set -u
+: "${XDG_RUNTIME_DIR:?}"
+if command -v pipewire >/dev/null 2>&1; then
+    pipewire > "$XDG_RUNTIME_DIR/pipewire.log" 2>&1 &
+    # WirePlumber needs PipeWire's socket.
+    n=0
+    while [ ! -S "$XDG_RUNTIME_DIR/pipewire-0" ] && [ $n -lt 50 ]; do
+        sleep 0.1
+        n=$((n + 1))
+    done
+    command -v wireplumber >/dev/null 2>&1 && wireplumber > "$XDG_RUNTIME_DIR/wireplumber.log" 2>&1 &
+fi
+exec weston --config="$XDG_RUNTIME_DIR/weston.ini"

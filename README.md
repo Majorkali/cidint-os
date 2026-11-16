@@ -6,13 +6,18 @@
 > **Status: version 1.0.0. Not production-ready: none of the twelve release
 > gates in [docs/STATUS.md](docs/STATUS.md) has passed.** The version number
 > was set by the project owner; it does not mean the planned feature set exists.
-> What exists today is the persistence and tooling foundation and a
-> x86_64 UEFI images (base, Server Edition, Desktop Edition preview), two
-> amnesic live ISOs with a console installer, optional encryption of the data
-> volume, a default-deny firewall, A/B updates with rollback, a sandboxed
-> local AI engine (no model included) and experimental security domains.
-> These pass their tests in QEMU. Nothing has **been run on physical
-> hardware**. The desktop is a basic Wayland session, not the planned one. The exact state of every feature is in [docs/STATUS.md](docs/STATUS.md);
+> What exists today is the persistence and tooling foundation and
+> x86_64 images (base, Server Edition, Desktop Edition), two amnesic live
+> ISOs with a console installer, optional encryption of the data volume, a
+> default-deny firewall, signed A/B updates with rollback, a sandboxed local
+> AI engine with a small included model, and experimental security domains.
+> The Desktop Edition has a login screen, file manager, settings, web
+> browser, media player, signed software store, Wi-Fi, Bluetooth, a sound
+> server with per-program volume and OpenGL acceleration through Mesa.
+> Secure Boot with the project's own keys is experimental. The newer parts
+> have QEMU tests that have not all run yet, and nothing has **been run on
+> physical hardware**. It is not comparable to a mature desktop system such
+> as Windows. The exact state of every feature is in [docs/STATUS.md](docs/STATUS.md);
 > the same list is printed by `cidint features`.
 
 ## What CIDINT OS is
@@ -47,8 +52,7 @@ The first rule of the design is that data is not lost on restart:
 | Yocto image `cidint-image-base` (read-only system, separate `/data`) | `meta-cidint`, `kas/` | built in CI; 15 boot, reboot and power-loss checks pass in QEMU (UEFI) |
 
 Results and run numbers are in [docs/TESTING.md](docs/TESTING.md). Not yet
-exercised: physical hardware, the second system slot (no update manager
-exists), and the SBOM archive's contents.
+exercised: physical hardware and the SBOM archive's contents.
 
 ## Try the CLI
 
@@ -81,6 +85,8 @@ successful run as artifacts. See [docs/BUILDING.md](docs/BUILDING.md).
 - [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) - what is and is not defended
 - [docs/BUILDING.md](docs/BUILDING.md) - toolchain, image build, QEMU
 - [docs/TESTING.md](docs/TESTING.md) - test plan and recorded results
+- [docs/HARDWARE-TESTING.md](docs/HARDWARE-TESTING.md) - trying CIDINT OS on a real PC
+- [docs/SECURE-BOOT.md](docs/SECURE-BOOT.md) - signing keys and Secure Boot
 
 ## History
 

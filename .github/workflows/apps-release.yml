@@ -1,0 +1,63 @@
+# Publish the signed software catalogue (apps/) as the GitHub release
+# "apps", the default software source of release images:
+#   https://github.com/<owner>/<repo>/releases/download/apps/index.json
+#
+# Needs, set up once by the maintainer (scripts/make-keys.sh prints the
+# commands): the secret CIDINT_APPS_SIGNING_KEY (private Ed25519 key of the
+# store) and the variable CIDINT_APPS_RELEASE_PUBKEY (its public half). The
+# run refuses to publish when they are missing or do not belong together.
+# Started by hand only: publishing is a decision, not a side effect of a push.
+name: Publish apps
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apps-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the signing key
+        env:
+          KEY: ${{ secrets.CIDINT_APPS_SIGNING_KEY }}
+          PUB: ${{ vars.CIDINT_APPS_RELEASE_PUBKEY }}
+        run: |
+          set -eu
+          if [ -z "$KEY" ] || [ -z "$PUB" ]; then
+            echo "::error::CIDINT_APPS_SIGNING_KEY (secret) and CIDINT_APPS_RELEASE_PUBKEY (variable) must be set; see scripts/make-keys.sh"
+            exit 1
+          fi
+          umask 077
+          printf '%s\n' "$KEY" > "$RUNNER_TEMP/apps.key"
+          got=$(openssl pkey -in "$RUNNER_TEMP/apps.key" -pubout | sed -n 2p)
+          if [ "$got" != "$PUB" ]; then
+            echo "::error::the signing key does not belong to CIDINT_APPS_RELEASE_PUBKEY; nothing was published"
+            exit 1
+          fi
+      - name: Build and sign the catalogue
+        run: |
+          python3 scripts/build-app-repo.py --key "$RUNNER_TEMP/apps.key" --out artifacts/app-repo
+          rm -f "$RUNNER_TEMP/apps.key"
+          printf '%s\n' '-----BEGIN PUBLIC KEY-----' "${{ vars.CIDINT_APPS_RELEASE_PUBKEY }}" '-----END PUBLIC KEY-----' \
+            > artifacts/app-repo/store-key.pub
+          openssl pkeyutl -verify -pubin -inkey artifacts/app-repo/store-key.pub -rawin \
+            -in artifacts/app-repo/index.json -sigfile artifacts/app-repo/index.json.sig
+      - name: Publish as the release "apps"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          if ! gh release view apps >/dev/null 2>&1; then
+            gh release create apps --title "Software catalogue" \
+              --notes "Signed software catalogue of CIDINT OS. Images built with CIDINT_APPS_RELEASE_PUBKEY use it as their default software source." \
+              --latest=false
+          fi
+          gh release upload apps artifacts/app-repo/* --clobber
+          echo "::notice title=Software source::https://github.com/${GITHUB_REPOSITORY}/releases/download/apps"

@@ -5,8 +5,10 @@
 
 Plays audio and video files. Formats: Ogg (Vorbis, Opus, Theora), WebM and
 Matroska with VP8/VP9, FLAC, MP3, WAV. Formats that need patent licences
-(H.264, H.265, AAC) are not included; such files show an error instead of
-playing. Without FILE, lists the files in ~/Music and ~/Videos."""
+(H.264, H.265, AAC in MP4 files) play only on builds made with the
+patented-codecs option (kas/codecs-patented.yml); otherwise such files
+show an error instead of playing. Without FILE, lists the files in ~/Music
+and ~/Videos."""
 import os
 import sys
 
@@ -19,7 +21,7 @@ from gi.repository import GLib, Gst, Gtk  # noqa: E402
 
 from cidint_desktop import theme  # noqa: E402
 
-MEDIA_EXT = (".ogg", ".oga", ".ogv", ".opus", ".flac", ".mp3", ".wav", ".webm", ".mkv", ".mka")
+MEDIA_EXT = (".ogg", ".oga", ".ogv", ".opus", ".flac", ".mp3", ".wav", ".webm", ".mkv", ".mka", ".mp4", ".m4a", ".m4v", ".mov", ".aac")
 
 
 def fmt(ns: int) -> str:
@@ -146,7 +148,11 @@ class Player(Gtk.Window):
         err, _dbg = msg.parse_error()
         text = err.message
         if "codec" in text.lower() or "decoder" in text.lower() or "missing" in text.lower():
-            text += " - this format is not supported in CIDINT OS (it needs a patent-licensed codec)."
+            if Gst.ElementFactory.find("avdec_h264") is None:
+                text += (" - this build has no decoder for this format. H.264, H.265 and AAC need "
+                         "patent licences and are only in builds made with the codecs option.")
+            else:
+                text += " - no decoder for this format is installed."
         self.status.set_text(text)
         print(f"cidint-media: error: {err.message}", file=sys.stderr, flush=True)
         self.stop()

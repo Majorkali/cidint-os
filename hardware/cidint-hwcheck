@@ -109,6 +109,29 @@ report() {
     ls /proc/asound/card*/id >/dev/null 2>&1 && for c in /proc/asound/card*/id; do echo "sound card      : $(cat "$c")"; done || echo "sound card      : none detected"
     grep -h '^N: Name=' /proc/bus/input/devices 2>/dev/null | sed 's/^N: Name=/input device    : /'
 
+    section "Bluetooth"
+    found_bt=0
+    for h in /sys/class/bluetooth/hci*; do
+        [ -e "$h" ] || continue
+        found_bt=1
+        echo "$(basename "$h")  driver $(basename "$(readlink -f "$h/device/driver" 2>/dev/null)" 2>/dev/null)  $(rd "$h/address" 2>/dev/null)"
+    done
+    [ $found_bt -eq 1 ] || echo "no Bluetooth controller found"
+    command -v rfkill >/dev/null 2>&1 && rfkill list 2>/dev/null | sed 's/^/  /'
+
+    section "Secure Boot"
+    if command -v cidint-secureboot >/dev/null 2>&1; then cidint-secureboot status; fi
+
+    section "OpenGL (cidint-gpucheck)"
+    if command -v cidint-gpucheck >/dev/null 2>&1; then
+        cidint-gpucheck 2>&1
+    else
+        echo "not installed on this edition (Desktop Edition only)"
+    fi
+
+    section "Sound (cidint-soundcheck)"
+    if command -v cidint-soundcheck >/dev/null 2>&1; then cidint-soundcheck 2>&1; else echo "not installed on this edition"; fi
+
     section "System health"
     echo "state           : $(systemctl is-system-running 2>/dev/null)"
     systemctl --failed --no-legend --plain 2>/dev/null | awk '{ print "failed unit     : " $1 }'

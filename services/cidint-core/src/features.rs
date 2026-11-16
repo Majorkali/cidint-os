@@ -267,9 +267,51 @@ pub const FEATURES: &[Feature] = &[
     ),
     f(
         "security",
-        "SELinux enforcing, Secure Boot, measured boot",
+        "UEFI Secure Boot with CIDINT keys: signed GRUB checking signed kernels and boot menu",
+        Experimental,
+        "installed systems and disk images only; QEMU test written (enrolled keys, changed kernel refused)",
+    ),
+    f(
+        "security",
+        "SELinux enforcing, measured boot, Secure Boot for live ISOs",
         Planned,
         "",
+    ),
+    f(
+        "desktop",
+        "Sound server (PipeWire, WirePlumber): per-program volume, output choice",
+        Untested,
+        "QEMU test written: streams listed, volume set, sound recorded on the host",
+    ),
+    f(
+        "desktop",
+        "Bluetooth (BlueZ): Settings page, cidint-bluetooth, Bluetooth audio",
+        Experimental,
+        "no test: QEMU has no Bluetooth radio",
+    ),
+    f(
+        "desktop",
+        "cidint-gpucheck: OpenGL check and fill-rate measurement; virtio-gpu (virgl)",
+        Untested,
+        "QEMU test written with virtio-gpu and virgl; no physical graphics card tried",
+    ),
+    f(
+        "hardware",
+        "Drivers and firmware for common Wi-Fi, Bluetooth and sound chips (incl. SOF)",
+        Untested,
+        "built into the Desktop Edition; only real hardware can show which work",
+    ),
+    f(
+        "apps",
+        "Published software catalogue (GitHub release) and USB/folder sources",
+        Untested,
+        "workflow needs the maintainer's release key; never run",
+    ),
+    f(
+        "desktop",
+        "H.264, H.265 and AAC decoders (opt-in build, patent licences)",
+        Experimental,
+        "kas/codecs-patented.yml; not built by CI",
     ),
     f(
         "security",

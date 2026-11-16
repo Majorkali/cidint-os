@@ -77,7 +77,8 @@ jobs:
             gawk wget git diffstat unzip texinfo gcc build-essential chrpath socat cpio \
             python3 python3-pip python3-pexpect xz-utils debianutils iputils-ping \
             python3-git python3-jinja2 python3-subunit zstd lz4 file locales \
-            libacl1 python3-venv qemu-system-x86 ovmf
+            libacl1 python3-venv qemu-system-x86 ovmf \
+            sbsigntool gnupg libegl1 libgbm1 libgl1-mesa-dri
       - name: Locale
         run: scripts/ci-run.sh "locale-gen" sudo locale-gen en_US.UTF-8
       - name: Install kas
@@ -109,6 +110,17 @@ jobs:
           umask 022
           python3 scripts/build-app-repo.py --key "$RUNNER_TEMP/apps-key/dev.key" --out artifacts/app-repo
           cp "$RUNNER_TEMP/apps-key/dev.pub" artifacts/app-repo/store-key-DEVELOPMENT.pub
+          # Secure Boot: throwaway UEFI and GPG boot keys of this run (the
+          # firmware of the Secure Boot test trusts only these).
+          scripts/make-keys.sh --dev "$RUNNER_TEMP/keys" > "$RUNNER_TEMP/keys.txt"
+          echo "CIDINT_SB_KEY_DIR=$RUNNER_TEMP/keys/boot" >> "$GITHUB_ENV"
+          echo "CIDINT_SB_KEY_ID=$(sed -n 's/^  CIDINT_SB_KEY_ID=//p' "$RUNNER_TEMP/keys.txt")" >> "$GITHUB_ENV"
+          # Release catalogue (workflow "Publish apps"): trusted and used as
+          # the default software source when the maintainer has set it up.
+          if [ -n "${{ vars.CIDINT_APPS_RELEASE_PUBKEY }}" ]; then
+            echo "CIDINT_APPS_RELEASE_PUBKEY=${{ vars.CIDINT_APPS_RELEASE_PUBKEY }}" >> "$GITHUB_ENV"
+            echo "CIDINT_STORE_URL=https://github.com/${GITHUB_REPOSITORY}/releases/download/apps" >> "$GITHUB_ENV"
+          fi
       - name: Restore build caches
         uses: actions/cache/restore@v4
         with:
@@ -270,6 +282,19 @@ jobs:
         if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
         run: |
           scripts/ci-run.sh "QEMU Wi-Fi test" python3 tests/qemu/wifi_test.py             artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-x86_64.wic             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: Virtual graphics processor, OpenGL through virgl (QEMU, UEFI)
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        run: |
+          # The runner has no graphics card: vgem gives QEMU a render node,
+          # the host's Mesa renders what the guest's virgl driver sends.
+          sudo modprobe vgem || echo "vgem is not available on this runner"
+          sudo chmod 666 /dev/dri/renderD* 2>/dev/null || true
+          scripts/ci-run.sh "QEMU GPU test" python3 tests/qemu/gpu_test.py             artifacts/image/cidint-os-${CIDINT_VERSION}-desktop-x86_64.wic             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+      - name: Secure Boot with enrolled CIDINT keys, tampered kernel refused (QEMU, UEFI)
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        run: |
+          python3 -m pip install --user virt-firmware==26.8.1
+          scripts/ci-run.sh "QEMU Secure Boot test" python3 tests/qemu/secureboot_test.py             artifacts/image/cidint-os-${CIDINT_VERSION}-x86_64.wic             --keys "$RUNNER_TEMP/keys/boot"             --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.secboot.fd             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd             --ovmf-vars-ms /usr/share/OVMF/OVMF_VARS_4M.ms.fd
       - name: AI engine, included model, sandbox, chat and inference (QEMU, UEFI)
         if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
         run: |

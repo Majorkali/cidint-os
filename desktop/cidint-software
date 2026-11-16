@@ -27,6 +27,13 @@ class Software(Gtk.Window):
         refresh = Gtk.Button(label="Refresh")
         refresh.connect("clicked", lambda *_: self.request("store_refresh"))
         hb.pack_end(refresh)
+        usb = Gtk.Button(label="Use USB stick")
+        usb.set_tooltip_text("Install from a USB stick or memory card holding a signed catalogue")
+        usb.connect("clicked", lambda *_: self.request("store_usb"))
+        hb.pack_start(usb)
+        other = Gtk.Button(label="Change source…")
+        other.connect("clicked", self.choose_source)
+        hb.pack_start(other)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=18)
         self.add(box)
@@ -56,7 +63,9 @@ class Software(Gtk.Window):
 
     def request(self, op, **kw):
         self.set_status({"store_list": "Loading…", "store_refresh": "Checking the software source…",
-                         "store_install": "Installing…", "store_remove": "Removing…"}[op])
+                         "store_install": "Installing…", "store_remove": "Removing…",
+                         "store_source": "Checking the new software source…",
+                         "store_usb": "Looking for a USB stick with software…"}[op])
         self.set_sensitive(False)
 
         def done(res, err):
@@ -66,16 +75,44 @@ class Software(Gtk.Window):
                 return
             self.set_status({"store_list": "", "store_refresh": "Catalogue verified.",
                              "store_install": "Installed. It is also on the panel after your next login.",
-                             "store_remove": "Removed."}[op], "cidint-ok")
+                             "store_remove": "Removed.", "store_source": "Software source changed; catalogue verified.",
+                             "store_usb": "Using the USB stick; catalogue verified."}[op], "cidint-ok")
             self.show_apps(res)
 
         theme.run_async(lambda: authclient.request(op, timeout=600, **kw), done)
 
+    def choose_source(self, *_):
+        d = Gtk.Dialog(title="Software source", transient_for=self, modal=True)
+        d.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Choose a folder…", 1, "Use", Gtk.ResponseType.OK)
+        box = d.get_content_area()
+        box.set_spacing(8)
+        box.add(theme.label("A web address (https://…) or a folder holding index.json and index.json.sig. "
+                            "Only catalogues signed with a key this system trusts are accepted.",
+                            "cidint-muted", wrap=True))
+        e = Gtk.Entry(activates_default=True, width_chars=50)
+        d.set_default_response(Gtk.ResponseType.OK)
+        box.add(e)
+        d.show_all()
+        while True:
+            r = d.run()
+            if r != 1:
+                break
+            fc = Gtk.FileChooserDialog(title="Folder with the software catalogue", transient_for=d,
+                                       action=Gtk.FileChooserAction.SELECT_FOLDER)
+            fc.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Select", Gtk.ResponseType.OK)
+            if fc.run() == Gtk.ResponseType.OK:
+                e.set_text(fc.get_filename() or "")
+            fc.destroy()
+        url = e.get_text().strip()
+        d.destroy()
+        if r == Gtk.ResponseType.OK and url:
+            self.request("store_source", source=url)
+
     def show_apps(self, res):
         src = res.get("source") or ""
         self.source.set_text(f"Software source: {src}" if src else
-                             "No software source is set. An administrator sets one with "
-                             "'cidint-store source ADDRESS' (a web address or a folder, e.g. on a USB stick).")
+                             "No software source is set. Use a USB stick, or choose a web address or "
+                             "folder with Change source.")
         for c in self.list.get_children():
             self.list.remove(c)
         apps = res.get("apps", [])

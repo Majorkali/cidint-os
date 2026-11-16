@@ -10,7 +10,10 @@
   cidint-authctl power reboot|poweroff
   cidint-authctl ask "QUESTION"      ask the local AI engine
   cidint-authctl store-list | store-refresh | store-install ID | store-remove ID
-                                     software store (desktop users)
+  cidint-authctl store-source ADDRESS | store-usb
+                                     software store (desktop users); a source
+                                     is a web address, a USB stick or a
+                                     folder in your home
 
 Exit codes: 0 ok, 1 refused or failed, 2 usage."""
 import json
@@ -42,6 +45,11 @@ def main(argv) -> int:
             r = authclient.request(op.replace("-", "_"), timeout=600)
             for a in r.get("apps", []):
                 print(f"{a['id']} {a.get('version', '')} installed={a.get('installed') or '-'}")
+            return 0
+        elif op in ("store-source", "store-usb") and len(args) == (1 if op == "store-source" else 0):
+            kw = {"source": args[0]} if args else {}
+            r = authclient.request(op.replace("-", "_"), timeout=600, **kw)
+            print(f"source {r.get('source', '')}: {len(r.get('apps', []))} app(s)")
             return 0
         elif op in ("store-install", "store-remove") and len(args) == 1:
             r = authclient.request(op.replace("-", "_"), timeout=600, id=args[0])

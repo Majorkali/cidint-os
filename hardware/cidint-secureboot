@@ -1,0 +1,49 @@
+#!/bin/sh
+# cidint-secureboot - UEFI Secure Boot state of this computer.
+#
+#   cidint-secureboot status          firmware state and boot file signatures
+#   cidint-secureboot export-cert DIR copy the CIDINT certificate (DER, .cer)
+#                                     to DIR, e.g. a USB stick, to enroll it
+#                                     in the firmware's setup screen
+#
+# Changes no firmware setting: keys are enrolled by you, in the firmware
+# (see docs/SECURE-BOOT.md). Exit codes: 0 ok, 1 failure, 2 usage.
+set -u
+EFIVARS=/sys/firmware/efi/efivars
+GV=8be4df61-93ca-11d2-aa0d-00e098032b8c
+CERT=/usr/share/cidint/boot/cidint-db.cer
+
+var() { od -An -t u1 -j 4 -N 1 "$EFIVARS/$1-$GV" 2>/dev/null | tr -d ' '; }
+
+case "${1:-}" in
+status)
+    if [ ! -d /sys/firmware/efi ]; then
+        echo "boot mode       : legacy BIOS (Secure Boot is a UEFI feature)"
+    else
+        case "$(var SecureBoot)" in 1) s=on ;; 0) s=off ;; *) s=unknown ;; esac
+        case "$(var SetupMode)" in 1) m="setup mode (keys can be enrolled)" ;; 0) m="user mode (keys are locked)" ;; *) m=unknown ;; esac
+        echo "secure boot     : $s"
+        echo "firmware keys   : $m"
+    fi
+    if [ -f /boot/EFI/BOOT/grub.cfg.sig ] && [ -f /boot/bzImage-a.sig ]; then
+        echo "boot files      : signed (GRUB checks the kernel and boot menu)"
+    elif [ -f /boot/EFI/BOOT/grub.cfg ]; then
+        echo "boot files      : not signed (Secure Boot must stay off)"
+    else
+        echo "boot files      : not found (/boot is not the EFI system partition of an installed system)"
+    fi
+    if [ -f "$CERT" ]; then
+        echo "CIDINT key      : $(openssl x509 -inform DER -in "$CERT" -noout -subject 2>/dev/null | sed 's/^subject=//')"
+        echo "fingerprint     : $(openssl x509 -inform DER -in "$CERT" -noout -fingerprint -sha256 2>/dev/null | sed 's/^.*=//')"
+    else
+        echo "CIDINT key      : none in this build"
+    fi
+    ;;
+export-cert)
+    [ $# -eq 2 ] || { echo "Usage: cidint-secureboot export-cert DIR" >&2; exit 2; }
+    [ -f "$CERT" ] || { echo "cidint-secureboot: this build has no Secure Boot certificate" >&2; exit 1; }
+    [ ! -e "$2/cidint-db.cer" ] || { echo "cidint-secureboot: $2/cidint-db.cer exists; not overwriting it" >&2; exit 1; }
+    cp "$CERT" "$2/cidint-db.cer" && sync && echo "written: $2/cidint-db.cer"
+    ;;
+*) echo "Usage: cidint-secureboot status | export-cert DIR" >&2; exit 2 ;;
+esac

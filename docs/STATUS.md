@@ -39,49 +39,83 @@ The authoritative list is `services/cidint-core/src/features.rs`
 - Firewall (nftables): outbound allowed, an inbound connection is dropped
 - A/B updates (`cidint-slot`): damaged update refused, update to the spare
   slot, trial start, automatic commit, rollback of an unconfirmed trial after
-  a power cut; user data unchanged. Checksums only, no signatures
+  a power cut; user data unchanged
 - Server Edition image: SSH with keys only, host key and authorised keys on `/data`
-- Desktop Edition preview: Weston session as an unprivileged user, wallpaper,
+- Desktop Edition: Weston session as an unprivileged user, wallpaper,
   panel and terminal seen on the real screen contents; also from a live ISO
 - Local AI engine (`cidint-ai`): sandbox without network or write access;
-  generated text from a 1 MB test model. No model is shipped
+  generated text from a 1 MB test model
 
 Tested on: Windows 11 x86_64 development host (Rust 1.100.0 and 1.75.0),
-GitHub `ubuntu-22.04` runners, and the image in QEMU (q35, OVMF). The image
-latest full run is 43747398237 (10 of 11 suites passed). The newer suites
-(desktop, AI) have passed once. Nothing has run on physical hardware.
+GitHub `ubuntu-22.04` runners, and the image in QEMU (q35, OVMF). The
+latest full run is 43747398237 (10 of 11 suites passed). Everything added
+after that run is listed below as not fully tested until a CI run records
+it. Nothing has run on physical hardware.
 
 ## Experimental
 
 - Security domains (`cidint-domain`): isolated micro-VMs with no network card
   and no disk. In three runs, one domain start hung during its kernel
   start-up. Nothing runs inside a domain and there is no transfer broker
+- UEFI Secure Boot (installed systems and disk images; not the live ISOs):
+  GRUB is signed for the firmware and checks GPG signatures of the kernel
+  and boot menu; the A/B boot state is the only unsigned input (names and
+  values are restricted). QEMU test written: enrolled keys, a changed kernel
+  refused, firmware without the CIDINT key refusing GRUB. CI uses throwaway
+  keys; release keys come from `scripts/make-keys.sh`. Enrolling keys on a
+  real PC is done in its firmware setup ([SECURE-BOOT.md](SECURE-BOOT.md))
+- Bluetooth (BlueZ, Settings page, `cidint-bluetooth`) and Bluetooth audio
+  through PipeWire: no test, because QEMU has no Bluetooth radio
+- Decoders for H.264, H.265 and AAC: only in builds made with
+  `kas/codecs-patented.yml` (patent licences are the builder's decision);
+  never built by CI
 
 ## Implemented but not fully tested
 
-- Installing the Desktop Edition from its live ISO (the ISO boots; the
-  install from it was not run)
+Written with QEMU tests that have not yet run in CI:
+
+- Signed updates (Ed25519) and no default root password (first-start prompt)
+- Login screen, Files, Settings, Assistant, browser (WebKitGTK), media player,
+  software store with signed catalogues, Wi-Fi (iwd; simulated radios)
+- Sound server (PipeWire with WirePlumber): every program its own volume,
+  output choice, test sound; recorded on the host in the QEMU test
+- OpenGL acceleration: Mesa drivers for Intel, AMD, NVIDIA (nouveau), VMware
+  and virtio-gpu; `cidint-gpucheck` renders off-screen and reads the result
+  back. The QEMU test uses virtio-gpu with virgl, which renders on the host,
+  so it exercises the driver path but not a physical graphics card
+- Drivers and firmware for common Wi-Fi (Intel, Qualcomm/Atheros, Broadcom,
+  Marvell, Realtek, MediaTek), Bluetooth and sound chips, including Sound Open
+  Firmware for Intel laptop audio DSPs. Only real hardware can show which work
+- Software catalogue publishing (workflow "Publish apps", GitHub release
+  `apps`) and software sources on USB sticks or folders. Publishing needs the
+  maintainer's release key and has not been run
+- Installed systems starting with legacy BIOS; installing the Desktop Edition
+  from its live ISO; live ISO from USB and under legacy BIOS
 - Updates to a different system version (the test re-installs the same one)
 - SPDX SBOM generation (enabled in the build; archive contents not checked)
-- The image, the live ISO and the installer on physical hardware (never tried)
-- Live ISO from a USB stick and under legacy BIOS (only CD-ROM under UEFI tried)
 - Installer on a disk that already holds data with `--erase-existing`, on
   NVMe device names, and its interactive typed confirmation (not exercised)
+- Everything on physical hardware: `cidint-hwcheck` writes the report a
+  hardware test needs ([HARDWARE-TESTING.md](HARDWARE-TESTING.md))
 
 ## Planned (nothing exists yet)
 
-Signed updates and an update server · TPM/FIDO2 unlock, recovery keys,
-encrypted system slots · privilege broker · SELinux enforcing · Secure/measured
-boot · applications inside domains and a transfer broker · privacy modes and
-kill switch · NOVA desktop (login screen, settings, file manager, themes,
-widgets), hardware-accelerated graphics · AI beyond plain text generation ·
-CASME automation · CUAEE application engine · identity (MFA, LDAP, Kerberos)
-· server databases, containers, HA · persistent live USB, graphical installer,
-server, recovery and minimal ISOs · architectures other than x86_64 · accessibility and localisation.
+Update server · TPM/FIDO2 unlock, recovery keys, encrypted system slots ·
+privilege broker · SELinux enforcing · measured boot · Secure Boot for the
+live ISOs (needs a shim signed by a key firmware already trusts) ·
+applications inside domains and a transfer broker · privacy modes and kill
+switch · NOVA themes and widgets · AI beyond plain text generation · CASME
+automation · CUAEE application engine · identity (MFA, LDAP, Kerberos) ·
+server databases, containers, HA · persistent live USB, graphical installer,
+server, recovery and minimal ISOs · architectures other than x86_64 ·
+accessibility and localisation.
 
 ## Unsupported
 
-iOS and legacy BlackBerry as host platforms.
+iOS and legacy BlackBerry as host platforms. NVIDIA's proprietary driver
+(only the open-source nouveau driver is included; its 3D speed on recent
+NVIDIA cards is low). Fingerprint readers, webcams' special features,
+printers and scanners have no support or tests.
 
 ## Known limitations of 1.0.0
 
@@ -93,9 +127,12 @@ iOS and legacy BlackBerry as host platforms.
   the tail or a full rewrite by someone with write access.
 - `/etc` is part of the read-only image. System configuration that must change
   at runtime needs the planned configuration layer on `/data/config`.
-- The data volume is not encrypted.
-- The dev image has an empty root password (`debug-tweaks`). It is a test
-  image, not something to deploy.
+- Encryption of the data volume is chosen at installation (`--encrypt-data`);
+  disk images and live media are not encrypted.
+- Signing keys of CI builds are throwaway keys of that run: their updates,
+  catalogues and Secure Boot signatures fit only images of the same run.
+- Apps from the store run with the user's permissions; a signature says who
+  made an app, not that it is harmless.
 - Layer pin: `poky` is pinned to a commit; the kas version is pinned; GitHub
   Actions are pinned by major tag, not by commit.
 

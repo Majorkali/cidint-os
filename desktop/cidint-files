@@ -20,7 +20,7 @@ from cidint_desktop import fileops, theme  # noqa: E402
 HOME = os.path.expanduser("~")
 TRASH = "trash://"
 ICONS = "/usr/share/cidint/icons"
-MEDIA = (".ogg", ".oga", ".ogv", ".opus", ".flac", ".mp3", ".wav", ".webm", ".mkv", ".mka")
+MEDIA = (".ogg", ".oga", ".ogv", ".opus", ".flac", ".mp3", ".wav", ".webm", ".mkv", ".mka", ".mp4", ".m4a", ".m4v", ".mov", ".aac")
 IMAGES = (".png", ".jpg", ".jpeg", ".gif")
 
 

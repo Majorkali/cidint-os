@@ -2,7 +2,7 @@
 """cidint-settings - CIDINT OS settings.
 
 Every page shows values read from the running system, and every control
-does what it says. Pages: About, Network, Wi-Fi, Sound, Display, Security, Updates, AI,
+does what it says. Pages: About, Network, Wi-Fi, Bluetooth, Sound, Display, Security, Updates, AI,
 Appearance, Account, Power."""
 import os
 import re
@@ -251,6 +251,7 @@ class Settings(Gtk.Window):
         stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
         for name, title, make in (("about", "About", about_page), ("network", "Network", network_page),
                                   ("wifi", "Wi-Fi", lambda: settings_hw.wifi_page(page, grid)),
+                                  ("bluetooth", "Bluetooth", lambda: settings_hw.bluetooth_page(page, grid)),
                                   ("sound", "Sound", lambda: settings_hw.sound_page(page, grid)),
                                   ("display", "Display", lambda: settings_hw.display_page(page, grid)),
                                   ("security", "Security", security_page), ("updates", "Updates", updates_page),

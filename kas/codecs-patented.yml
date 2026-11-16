@@ -1,0 +1,24 @@
+# OPTIONAL: CIDINT OS with decoders for patent-encumbered formats.
+#
+#   kas build kas/cidint-x86-64-dev.yml:kas/codecs-patented.yml
+#
+# Adds FFmpeg's decoders through GStreamer (gstreamer1.0-libav: H.264,
+# H.265/HEVC, AAC, and the other formats FFmpeg decodes) to the Desktop
+# Edition, and AAC for Bluetooth audio (fdk-aac in PipeWire).
+#
+# These formats are covered by patents in many countries. Building and
+# distributing images with them may need patent licences (for example from
+# the MPEG LA / Access Advance / Via LA pools) depending on where and how
+# the images are used and shipped. Whoever builds and distributes such
+# images decides and is responsible; the CIDINT project does not hold
+# licences and does not build or publish these images by default.
+# Turning this on accepts Yocto's "commercial" licence flag for all recipes.
+header:
+  version: 14
+  includes:
+    - kas/cidint-x86-64-dev.yml
+
+local_conf_header:
+  cidint-codecs: |
+    LICENSE_FLAGS_ACCEPTED += "commercial"
+    CIDINT_PATENTED_CODECS = "1"

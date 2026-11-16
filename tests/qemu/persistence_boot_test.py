@@ -57,9 +57,11 @@ class Vm:
     def __init__(self, image: Path, code: Path | None, nvram: Path | None, log, cdrom: bool = False,
                  extra_disk: Path | None = None, passphrase: str | None = None,
                  root_password: str = TEST_ROOT_PASSWORD, nic: list[str] | None = None,
-                 usb: bool = False):
+                 usb: bool = False, secure_boot: bool = False, extra: list[str] | None = None):
         """code/nvram None: legacy BIOS (SeaBIOS) instead of UEFI.
-        usb: attach the image as a read-only USB stick instead."""
+        usb: attach the image as a read-only USB stick instead.
+        secure_boot: firmware built with Secure Boot (needs SMM).
+        extra: further QEMU arguments (devices, audio, graphics)."""
         self.passphrase = passphrase
         self.root_password = root_password
         self.unlock_prompts = 0
@@ -83,10 +85,12 @@ class Vm:
             media = ["-drive", f"file={image},format=raw,if=none,id=disk0",
                      "-device", "ide-hd,drive=disk0,bus=ide.0"]
         cmd = [
-            "qemu-system-x86_64", "-machine", "q35", "-m", "2048", "-smp", "2", *accel,
+            "qemu-system-x86_64", "-machine", "q35,smm=on" if secure_boot else "q35",
+            "-m", "2048", "-smp", "2", *accel,
+            *(["-global", "driver=cfi.pflash01,property=secure,value=on"] if secure_boot else []),
             *firmware,
             *media,
-            "-display", "none", "-serial", "stdio", "-monitor", "none",
+            *(extra or ["-display", "none"]), "-serial", "stdio", "-monitor", "none",
             *(nic or ["-nic", "none"]),
         ]
         self.log = log

@@ -1,0 +1,49 @@
+#!/bin/sh
+# cidint-soundcheck - what sound hardware works, and can it play?
+#
+#   cidint-soundcheck [--play]
+#
+# Lists the sound cards the kernel found (with their drivers), firmware the
+# sound drivers asked for and did not find, and, inside a desktop session,
+# the outputs and programs of the sound server (PipeWire). --play plays a
+# two-second test sound on the default output; you judge whether you hear
+# it. Changes nothing. Exit codes: 0 ok, 1 no sound card, 2 usage.
+set -u
+case "${1:-}" in --play|"") ;; *) echo "Usage: cidint-soundcheck [--play]" >&2; exit 2 ;; esac
+
+echo "== Sound cards (kernel) =="
+found=0
+for c in /proc/asound/card[0-9]*; do
+    [ -d "$c" ] || continue
+    found=1
+    n=${c#/proc/asound/card}
+    drv=$(basename "$(readlink -f "/sys/class/sound/card$n/device/driver" 2>/dev/null)" 2>/dev/null)
+    echo "card $n: $(cat "$c/id" 2>/dev/null)  driver ${drv:-unknown}"
+    for codec in "$c"/codec#*; do
+        [ -f "$codec" ] && sed -n 's/^Codec: /  codec: /p' "$codec"
+    done
+done
+[ $found -eq 1 ] || echo "no sound card found (no driver for the sound hardware, or none fitted)"
+
+echo
+echo "== Sound firmware the kernel could not find =="
+dmesg 2>/dev/null | grep -iE '(sof|snd|hda|audio|dsp).*(firmware|tplg).*(fail|not found|-2)' | tail -n 8 || true
+
+echo
+echo "== Sound server (this session) =="
+if command -v wpctl >/dev/null 2>&1 && wpctl status >/dev/null 2>&1; then
+    wpctl status 2>/dev/null | sed -n '/^Audio/,/^Video/p' | sed '$d'
+else
+    echo "no PipeWire sound server reachable (outside a desktop session, programs use ALSA directly)"
+fi
+
+if [ "${1:-}" = --play ]; then
+    echo
+    echo "playing a test sound on the default output..."
+    if command -v pw-play >/dev/null 2>&1 && wpctl status >/dev/null 2>&1; then
+        pw-play /usr/share/cidint/sounds/test-chime.wav
+    else
+        aplay -q /usr/share/cidint/sounds/test-chime.wav
+    fi && echo "played (did you hear it?)" || echo "could not play the test sound"
+fi
+[ $found -eq 1 ]

@@ -91,6 +91,18 @@ class StoreTest(unittest.TestCase):
                 store._safe_extract(buf.getvalue(), d)
             self.assertFalse(os.path.exists(os.path.join(os.path.dirname(d), "escape")))
 
+    @unittest.skipIf(os.name == "nt", "POSIX paths")
+    def test_sources_a_desktop_user_may_choose(self):
+        ok = store.allowed_user_source
+        self.assertTrue(ok("https://example.org/apps", "/home/cidint"))
+        self.assertTrue(ok("/run/cidint-store-media/sdb1/cidint-apps", "/home/cidint"))
+        self.assertTrue(ok("file:///home/cidint/Downloads/repo", "/home/cidint"))
+        self.assertFalse(ok("/etc", "/home/cidint"))
+        self.assertFalse(ok("/home/other/repo", "/home/cidint"))
+        self.assertFalse(ok("/home/cidint/../other", "/home/cidint"))
+        self.assertFalse(ok("/home/cidintx/repo", "/home/cidint"))
+        self.assertFalse(ok("ftp://example.org/", "/home/cidint"))
+
 
 if __name__ == "__main__":
     unittest.main()

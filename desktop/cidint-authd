@@ -231,14 +231,29 @@ def handle(req: dict, uid: int) -> dict:
             return {"ok": False, "error": (r.stderr.strip() or "the engine failed")[-300:]}
         return {"ok": True, "answer": r.stdout.strip()}
 
-    if op in ("store_list", "store_refresh", "store_install", "store_remove"):
+    if op in ("store_list", "store_refresh", "store_install", "store_remove", "store_source", "store_usb"):
         if caller not in desktop_users():
             return {"ok": False, "error": "only desktop users can use the software store"}
         sys.path.insert(0, "/usr/lib/cidint/desktop")
         from cidint_desktop import store
         try:
             with store_lock:
-                if op == "store_refresh":
+                if op == "store_source":
+                    url = str(req.get("source", "")).strip()
+                    if not url or not store.allowed_user_source(url, f"/home/{caller}"):
+                        return {"ok": False, "error": "choose a web address, a USB stick or a folder in your home"}
+                    store.set_source(url)
+                    log(f"store: {caller} set the software source to {url}")
+                    store.refresh()
+                elif op == "store_usb":
+                    found = store.removable_sources()
+                    if not found:
+                        return {"ok": False, "error": "no USB stick or memory card with a software catalogue "
+                                "(index.json, at the top or in cidint-apps/) was found"}
+                    store.set_source(found[0])
+                    log(f"store: {caller} set the software source to {found[0]}")
+                    store.refresh()
+                elif op == "store_refresh":
                     store.refresh()
                 elif op == "store_install":
                     meta = store.install(str(req.get("id", "")))
