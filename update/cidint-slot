@@ -136,7 +136,8 @@ cmd_install() {
     resize2fs "$DEV" >/dev/null 2>&1 || fail "could not grow the filesystem"
 
     # Carry this machine's settings over to the new system: mounts,
-    # the encrypted data volume's identity and the root password.
+    # the encrypted data volume's identity and the passwords of all
+    # accounts that exist in both systems.
     mkdir -p "$WORK/new"
     mount "$DEV" "$WORK/new"
     trap 'umount "$WORK/new" 2>/dev/null || true' EXIT
@@ -145,8 +146,7 @@ cmd_install() {
         mkdir -p "$WORK/new/etc/cidint"
         cat /etc/cidint/data-volume > "$WORK/new/etc/cidint/data-volume"
     fi
-    HASH=$(awk -F: '$1 == "root" { print $2 }' /etc/shadow)
-    awk -F: -v OFS=: -v h="$HASH" '$1 == "root" { $2 = h } { print }' "$WORK/new/etc/shadow" > "$WORK/shadow.new"
+    awk -F: -v OFS=: 'NR == FNR { if ($2 ~ /^\$/) h[$1] = $2; next } ($1 in h) { $2 = h[$1] } { print }'         /etc/shadow "$WORK/new/etc/shadow" > "$WORK/shadow.new"
     cat "$WORK/shadow.new" > "$WORK/new/etc/shadow"
     rm -f "$WORK/shadow.new"
     sync

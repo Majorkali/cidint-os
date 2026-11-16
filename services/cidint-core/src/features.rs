@@ -123,9 +123,15 @@ pub const FEATURES: &[Feature] = &[
     ),
     f(
         "desktop",
-        "Graphical session preview (Weston, software rendering, no login screen)",
+        "Graphical session (Weston, software rendering)",
         Tested,
         "QEMU: session starts unprivileged, wallpaper and a terminal on screen; not the NOVA desktop",
+    ),
+    f(
+        "desktop",
+        "Login screen, Files, Settings and Assistant (GTK 3, privileged helper cidint-authd)",
+        Untested,
+        "written with QEMU checks (keyboard login, apps on screen, password change, logout)",
     ),
     f(
         "security",
@@ -171,6 +177,12 @@ pub const FEATURES: &[Feature] = &[
     ),
     f(
         "hardware",
+        "Hardware report for real-computer testing (cidint-hwcheck)",
+        Untested,
+        "QEMU check written; no real computer tested yet (docs/HARDWARE-TESTING.md)",
+    ),
+    f(
+        "hardware",
         "Hardware inventory from /proc and /sys",
         Tested,
         "parser tests; live read on a GitHub Linux runner",
@@ -192,6 +204,12 @@ pub const FEATURES: &[Feature] = &[
         "Live ISO from a USB stick and under legacy BIOS",
         Untested,
         "QEMU tests written (USB with UEFI and BIOS, CD-ROM with BIOS); no real hardware",
+    ),
+    f(
+        "build",
+        "Installed systems starting with legacy BIOS (GRUB in a BIOS boot partition)",
+        Untested,
+        "installer and QEMU test (SeaBIOS) written",
     ),
     f(
         "build",

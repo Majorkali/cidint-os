@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""cidint-authctl - command-line client of cidint-authd.
+
+  cidint-authctl status
+  cidint-authctl login USER          password on standard input (root only;
+                                     the login screen uses the same request)
+  cidint-authctl passwd              current and new password on two lines
+                                     of standard input
+  cidint-authctl logout
+  cidint-authctl power reboot|poweroff
+  cidint-authctl ask "QUESTION"      ask the local AI engine
+
+Exit codes: 0 ok, 1 refused or failed, 2 usage."""
+import json
+import sys
+
+sys.path.insert(0, "/usr/lib/cidint/desktop")
+from cidint_desktop import authclient  # noqa: E402
+
+
+def main(argv) -> int:
+    if not argv:
+        print(__doc__.split("\n\n", 1)[1], file=sys.stderr)
+        return 2
+    op, args = argv[0], argv[1:]
+    try:
+        if op == "status" and not args:
+            r = authclient.request("status")
+        elif op == "login" and len(args) == 1:
+            r = authclient.request("login", timeout=60, user=args[0], password=sys.stdin.readline().rstrip("\n"))
+        elif op == "passwd" and not args:
+            old = sys.stdin.readline().rstrip("\n")
+            new = sys.stdin.readline().rstrip("\n")
+            r = authclient.request("passwd", old=old, new=new)
+        elif op == "logout" and not args:
+            r = authclient.request("logout")
+        elif op == "power" and len(args) == 1:
+            r = authclient.request("power", action=args[0])
+        elif op == "ask" and len(args) == 1:
+            r = authclient.request("ai_chat", timeout=660, question=args[0])
+            print(r.get("answer", ""))
+            return 0
+        else:
+            print(__doc__.split("\n\n", 1)[1], file=sys.stderr)
+            return 2
+    except authclient.AuthError as e:
+        print(f"cidint-authctl: {e}", file=sys.stderr)
+        return 1
+    r.pop("ok", None)
+    print(json.dumps(r) if r else "ok")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

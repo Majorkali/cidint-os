@@ -7,11 +7,18 @@ session by looking at the actual screen contents.
 The image is copied first; the build output is never modified. Exit code
 0 only if every check passed. Screenshots are saved as PNG evidence.
 
-Checks:
-  - the session service is active and the compositor does not run as root
-  - the Wayland socket of the session exists
-  - the screen (QEMU screen dump) shows the configured desktop background
-  - starting a terminal changes what is on the screen
+Checks (installed image):
+  - first start asks for the root and desktop-user passwords
+  - the login screen runs unprivileged and is on the screen
+  - a wrong password typed on the (virtual) keyboard is refused, the
+    right one starts the session as the unprivileged user
+  - wallpaper and panel on screen; Terminal, Files, Settings and
+    Assistant each open a window and keep running
+  - privileged requests are checked by caller: status, login refused for
+    users, password change (wrong/right), assistant answer, logout back
+    to the login screen
+Live ISO (--cdrom): the session starts without a login screen; the same
+screen and application checks.
 """
 import argparse
 import json
@@ -28,7 +35,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from persistence_boot_test import Vm, system_state  # noqa: E402
+from persistence_boot_test import TEST_ROOT_PASSWORD, Vm, system_state  # noqa: E402
 
 SAMPLES = json.loads((HERE / "wallpaper-samples.json").read_text())["points"]
 
@@ -76,6 +83,23 @@ def near(a, b, tol=6) -> bool:
     return all(abs(x - y) <= tol for x, y in zip(a, b))
 
 
+KEYS = {"-": "minus", " ": "spc", "\n": "ret", ".": "dot", "/": "slash", "_": ("shift", "minus")}
+
+
+def type_text(qmp, text: str):
+    """Type on the virtual machine's keyboard (QMP send-key)."""
+    for ch in text:
+        if ch.isdigit() or ("a" <= ch <= "z"):
+            keys = [ch]
+        elif "A" <= ch <= "Z":
+            keys = ["shift", ch.lower()]
+        else:
+            k = KEYS[ch]
+            keys = list(k) if isinstance(k, tuple) else [k]
+        qmp.cmd("send-key", keys=[{"type": "qcode", "data": k} for k in keys])
+        time.sleep(0.08)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("image", type=Path)
@@ -93,6 +117,10 @@ def main() -> int:
         shutil.copyfile(args.image, disk)
     shutil.copyfile(args.ovmf_vars, nvram)
     qmp_path = f"/tmp/cidint-desktop-qmp-{os.getpid()}.sock"
+    live = args.cdrom
+    user = "cidint"
+    run_dir = f"/run/cidint-session-{user}"
+    session_unit = f"cidint-desktop@{user}.service"
 
     results = []
 
@@ -117,8 +145,7 @@ def main() -> int:
 
     def wallpaper_match(w: int, h: int, rgb: bytes) -> float:
         """Share of reference points (below the panel) where the screen
-        shows the wallpaper's colour. The wallpaper is stretched to the
-        screen, so relative positions correspond."""
+        shows the wallpaper's colour."""
         hit = total = 0
         for p in SAMPLES:
             if p["v"] < 0.08:
@@ -129,12 +156,34 @@ def main() -> int:
             hit += near(tuple(rgb[i:i + 3]), tuple(p["rgb"]), tol=16)
         return hit / total if total else 0.0
 
+    def changed(a: bytes, b: bytes) -> float:
+        return sum(1 for i in range(0, min(len(a), len(b)), 3 * 7)
+                   if a[i:i + 3] != b[i:i + 3]) / max(1, len(a) // 21)
+
+    def login_screen_look(rgb: bytes):
+        px = [rgb[i:i + 3] for i in range(0, len(rgb), 3 * 13)]
+        dark = sum(1 for r, g, b in px if r < 50 and g < 80 and b < 100) / len(px)
+        bright = sum(1 for r, g, b in px if r > 200 and g > 200 and b > 200) / len(px)
+        return dark, bright
+
     def diagnostics(vm) -> str:
-        rc, out = vm.run("journalctl -b -u cidint-desktop.service --no-pager -o cat | grep -v '^$' | tail -n 30; "
+        rc, out = vm.run(f"journalctl -b -u {session_unit} -u cidint-greeter.service -u cidint-authd.service "
+                         "--no-pager -o cat | grep -v '^$' | tail -n 40; "
                          "journalctl -b -u seatd.service --no-pager -o cat | tail -n 6; ls /dev/dri 2>&1; "
-                         "id cidint; "
-                         "dmesg | grep -i -E 'drm|bochs|virtio_gpu|simple-framebuffer' | tail -n 8")
+                         f"id {user}; dmesg | grep -i -E 'drm|bochs|virtio_gpu|simple-framebuffer' | tail -n 6")
         return out
+
+    def wait_active(vm, unit: str, tries: int = 30) -> str:
+        state = ""
+        for _ in range(tries):
+            rc, state = vm.run(f"systemctl is-active {unit}")
+            if state == "active":
+                break
+            time.sleep(2)
+        return state
+
+    def as_user(cmd: str) -> str:
+        return f"su -s /bin/sh {user} -c \"{cmd}\""
 
     error = None
     log_path = work / "desktop-serial.log"
@@ -145,43 +194,120 @@ def main() -> int:
                     nic=["-nic", "none", "-qmp", f"unix:{qmp_path},server=on,wait=off"])
             qmp = Qmp(qmp_path)
             vm.login()
-            step("boot: desktop image reaches a login prompt on the serial console", True)
+            step("boot: desktop image reaches a shell on the serial console", True)
+            if not live and vm.first_start_prompts:
+                # A fresh disk image (an installed disk got its passwords from
+                # the installer and is not asked).
+                step("first start: passwords were asked for root and the desktop user",
+                     vm.first_start_prompts == 2, f"prompts={vm.first_start_prompts}")
 
-            state = ""
-            for _ in range(20):
-                rc, state = vm.run("systemctl is-active cidint-desktop.service")
-                if state == "active":
-                    break
-                time.sleep(3)
-            step("graphical session service is active", state == "active",
-                 state + "\n" + (diagnostics(vm) if state != "active" else ""))
+            rc, out = vm.run("systemctl is-active cidint-authd.service")
+            step("the login service (cidint-authd) is running", out == "active", out)
+
+            if not live:
+                # ---- login screen -------------------------------------------
+                state = wait_active(vm, "cidint-greeter.service")
+                step("the login screen service is active", state == "active", state + "\n" + diagnostics(vm))
+                rc, out = vm.run("for p in $(pidof weston); do stat -c %U /proc/$p; done | sort -u")
+                step("the login screen runs as the unprivileged user 'cidint-greeter'", out == "cidint-greeter", out)
+                time.sleep(12)
+                w, h, shot = screenshot(qmp, "login-screen")
+                dark, bright = login_screen_look(shot)
+                step("screen: the login screen is displayed (dark background, light text, no desktop)",
+                     dark > 0.5 and bright > 0.001 and wallpaper_match(w, h, shot) < 0.5,
+                     f"dark={dark:.2f} bright={bright:.4f} wallpaper={wallpaper_match(w, h, shot):.2f}\n"
+                     + diagnostics(vm))
+
+                type_text(qmp, "wrongpassword\n")
+                time.sleep(8)
+                rc, s1 = vm.run(f"systemctl is-active {session_unit}")
+                rc, s2 = vm.run("systemctl is-active cidint-greeter.service")
+                rc, j = vm.run("journalctl -b -u cidint-authd.service --no-pager -o cat | grep -c 'login failed'")
+                step("a wrong password typed at the login screen is refused",
+                     s1 != "active" and s2 == "active" and j not in ("", "0"), f"session={s1} greeter={s2} failed={j}")
+
+                type_text(qmp, TEST_ROOT_PASSWORD + "\n")
+                state = wait_active(vm, session_unit, 40)
+                rc, g = vm.run("systemctl is-active cidint-greeter.service")
+                step("the right password starts the desktop session; the login screen closes",
+                     state == "active" and g != "active", f"session={state} greeter={g}\n"
+                     + ("" if state == "active" else diagnostics(vm)))
+            else:
+                state = wait_active(vm, session_unit)
+                rc, g = vm.run("systemctl is-active cidint-greeter.service")
+                step("live medium: the desktop session starts without a login screen",
+                     state == "active" and g != "active", f"session={state} greeter={g}\n" + diagnostics(vm))
 
             rc, out = vm.run("for p in $(pidof weston); do stat -c %U /proc/$p; done | sort -u")
-            step("the compositor runs as the unprivileged user 'cidint', not root", out.strip() == "cidint", out)
+            step(f"the compositor runs as the unprivileged user '{user}', not root", out == user, out)
             sock = ""
-            for _ in range(10):
-                rc, sock = vm.run("ls /run/cidint-session/ | grep -E '^wayland-[0-9]+$' | head -n 1")
+            for _ in range(15):
+                rc, sock = vm.run(f"ls {run_dir}/ | grep -E '^wayland-[0-9]+$' | head -n 1")
                 if sock:
                     break
                 time.sleep(2)
             step("the session's Wayland socket exists", sock.startswith("wayland-"), sock or diagnostics(vm))
 
-            time.sleep(5)
-            w, h, before = screenshot(qmp, "desktop")
-            bg = wallpaper_match(w, h, before)
-            colours = len(Counter(before[i:i + 3] for i in range(0, len(before), 3 * 11)))
-            step("screen: the CIDINT wallpaper is displayed", bg > 0.85 and colours > 50,
-                 f"{w}x{h}, {bg:.2f} of reference points match, {colours} colours\n"
-                 + (diagnostics(vm) if bg <= 0.85 else ""))
+            time.sleep(6)
+            w, h, base = screenshot(qmp, "desktop")
+            bg = wallpaper_match(w, h, base)
+            colours = len(Counter(base[i:i + 3] for i in range(0, len(base), 3 * 11)))
+            step("screen: the CIDINT wallpaper and panel are displayed", bg > 0.85 and colours > 50,
+                 f"{w}x{h}, {bg:.2f} of reference points match, {colours} colours")
 
-            vm.run(f"su -s /bin/sh cidint -c 'XDG_RUNTIME_DIR=/run/cidint-session WAYLAND_DISPLAY={sock} "
-                   "weston-terminal >/dev/null 2>&1 &'")
-            time.sleep(10)
-            w, h, after = screenshot(qmp, "desktop-terminal")
-            changed = sum(1 for i in range(0, min(len(before), len(after)), 3 * 7)
-                          if before[i:i + 3] != after[i:i + 3]) / max(1, len(before) // 21)
-            step("screen: a terminal window appears when started in the session", changed > 0.03,
-                 f"{changed:.3f} of sampled pixels changed")
+            env = (f"XDG_RUNTIME_DIR={run_dir} WAYLAND_DISPLAY={sock} HOME=/home/{user} USER={user} "
+                   "GDK_BACKEND=wayland")
+            for app, args_, label in (("weston-terminal", "", "Terminal"), ("cidint-files", f"/home/{user}", "Files"),
+                                      ("cidint-settings", "", "Settings"), ("cidint-assistant", "", "Assistant")):
+                vm.run(as_user(f"{env} {app} {args_} >/tmp/{app}.log 2>&1 &"))
+                diff, shot = 0.0, base
+                for _ in range(12):
+                    time.sleep(4)
+                    w, h, shot = screenshot(qmp, f"app-{app}")
+                    diff = changed(base, shot)
+                    if diff > 0.03:
+                        time.sleep(3)
+                        w, h, shot = screenshot(qmp, f"app-{app}")
+                        break
+                rc, alive = vm.run(f"pgrep -f '{app}' >/dev/null && echo running || echo stopped")
+                rc, applog = vm.run(f"tail -n 15 /tmp/{app}.log")
+                step(f"app: {label} opens a window and keeps running",
+                     diff > 0.03 and alive == "running" and "Traceback" not in applog,
+                     f"{diff:.3f} of sampled pixels changed; {alive}\n{applog}")
+                vm.run(f"pkill -f '{app}'; sleep 2")
+
+            if not live:
+                # ---- privileged requests, checked by caller identity ----------
+                rc, out = vm.run(as_user("cidint-authctl status"))
+                step("cidint-authd reports the running session", rc == 0 and f'"session_user": "{user}"' in out, out)
+                rc, out = vm.run(as_user("echo x | cidint-authctl login cidint"))
+                step("only the login screen may start sessions (a user's request is refused)",
+                     rc != 0 and "login screen" in out, out)
+                rc, before = vm.run(f"grep '^{user}:' /etc/shadow | cut -d: -f2")
+                rc, out = vm.run(f"printf 'not-the-password\\nnewpassword-42\\n' | " + as_user("cidint-authctl passwd"))
+                step("password change with a wrong current password is refused", rc != 0, out)
+                rc, out = vm.run(f"printf '{TEST_ROOT_PASSWORD}\\nnewpassword-42\\n' | " + as_user("cidint-authctl passwd"))
+                rc2, after = vm.run(f"grep '^{user}:' /etc/shadow | cut -d: -f2")
+                rc3, ro = vm.run("awk '$2 == \"/\" { print $4 }' /proc/mounts | tail -n 1 | cut -d, -f1")
+                step("password change works; new hash stored, system slot read-only again",
+                     rc == 0 and after.startswith("$6$") and after != before and ro == "ro",
+                     f"{out} changed={after != before} root={ro}")
+                vm.run(f"printf 'newpassword-42\\n{TEST_ROOT_PASSWORD}\\n' | " + as_user("cidint-authctl passwd"))
+
+                rc, out = vm.run(as_user("cidint-authctl ask 'What is two plus two? Answer with a number.'"),
+                                 timeout=900)
+                step("assistant: the session user gets an answer from the local AI engine",
+                     rc == 0 and len(out.strip()) > 0, out[-500:])
+                results[-1]["answer"] = out[-1000:]
+
+                rc, out = vm.run(as_user("cidint-authctl logout"))
+                state = wait_active(vm, "cidint-greeter.service", 30)
+                rc, s = vm.run(f"systemctl is-active {session_unit}")
+                time.sleep(10)
+                w, h, shot = screenshot(qmp, "login-screen-after-logout")
+                dark, bright = login_screen_look(shot)
+                step("logout ends the session and the login screen returns",
+                     state == "active" and s != "active" and dark > 0.5, f"greeter={state} session={s} dark={dark:.2f}")
 
             ok, out = system_state(vm)
             step("no failed units", ok, out)

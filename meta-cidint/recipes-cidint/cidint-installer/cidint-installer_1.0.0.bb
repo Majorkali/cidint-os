@@ -28,4 +28,5 @@ RDEPENDS:${PN} = "\
     cryptsetup \
     openssl-bin \
     grub-editenv \
+    grub \
 "

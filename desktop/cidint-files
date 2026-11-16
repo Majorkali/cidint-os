@@ -1,0 +1,306 @@
+#!/usr/bin/env python3
+"""cidint-files - the CIDINT OS file manager.
+
+Browse folders, create folders, rename, copy, cut and paste, move to the
+trash, restore from the trash, empty it, and read text files."""
+import os
+import sys
+import time
+
+sys.path.insert(0, "/usr/lib/cidint/desktop")
+import gi  # noqa: E402
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gdk, GdkPixbuf, Gtk, Pango  # noqa: E402
+
+from cidint_desktop import fileops, theme  # noqa: E402
+
+HOME = os.path.expanduser("~")
+TRASH = "trash://"
+ICONS = "/usr/share/cidint/icons"
+
+
+class Files(Gtk.Window):
+    def __init__(self, start: str):
+        super().__init__(title="Files")
+        self.set_default_size(960, 600)
+        self.connect("destroy", Gtk.main_quit)
+        self.history = []
+        self.clip = ([], "copy")
+        self.show_hidden = False
+
+        hb = Gtk.HeaderBar(show_close_button=True)
+        hb.props.title = "Files"
+        self.set_titlebar(hb)
+        self.back = self.text_button("‹ Back", "Back", self.go_back)
+        self.up = self.text_button("Up", "Parent folder", self.go_up)
+        hb.pack_start(self.back)
+        hb.pack_start(self.up)
+        hb.pack_start(self.text_button("Home", "Home folder", lambda *_: self.open(HOME)))
+        self.pix = {}
+        for kind in ("folder", "file"):
+            try:
+                self.pix[kind] = GdkPixbuf.Pixbuf.new_from_file(f"{ICONS}/{kind}-small.png")
+            except Exception:
+                self.pix[kind] = None
+        hidden = Gtk.ToggleButton(label="Hidden")
+        hidden.set_tooltip_text("Show hidden files")
+        hidden.connect("toggled", self.on_hidden)
+        hb.pack_end(hidden)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.add(root)
+        tools = Gtk.Box(spacing=6, margin=8)
+        self.buttons = {}
+        for key, text in (("new", "New folder"), ("rename", "Rename"), ("copy", "Copy"), ("cut", "Cut"),
+                          ("paste", "Paste"), ("trash", "Move to Trash"), ("restore", "Restore"),
+                          ("empty", "Empty Trash")):
+            b = Gtk.Button(label=text)
+            b.connect("clicked", getattr(self, "on_" + key))
+            tools.pack_start(b, False, False, 0)
+            self.buttons[key] = b
+        self.buttons["trash"].get_style_context().add_class("destructive-action")
+        self.buttons["empty"].get_style_context().add_class("destructive-action")
+        root.pack_start(tools, False, False, 0)
+        self.where = theme.label("", "cidint-key", 0.0)
+        self.where.set_ellipsize(Pango.EllipsizeMode.START)
+        self.where.set_margin_start(10)
+        root.pack_start(self.where, False, False, 2)
+
+        paned = Gtk.Paned()
+        root.pack_start(paned, True, True, 0)
+        self.places = Gtk.ListBox()
+        self.places.set_size_request(170, -1)
+        self.places.connect("row-activated", self.on_place)
+        for name, path in (("Home", HOME), ("Documents", os.path.join(HOME, "Documents")),
+                           ("Downloads", os.path.join(HOME, "Downloads")),
+                           ("Pictures", os.path.join(HOME, "Pictures")), ("Trash", TRASH)):
+            row = Gtk.ListBoxRow()
+            row.add(theme.label("  " + name, "", 0.0))
+            row.path = path
+            self.places.add(row)
+        paned.pack1(self.places, False, False)
+
+        # name, icon, size text, modified text, full path, is folder
+        self.store = Gtk.ListStore(str, GdkPixbuf.Pixbuf, str, str, str, bool)
+        self.view = Gtk.TreeView(model=self.store)
+        self.view.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
+        self.view.connect("row-activated", self.on_activate)
+        col = Gtk.TreeViewColumn("Name")
+        icon = Gtk.CellRendererPixbuf()
+        text = Gtk.CellRendererText(ellipsize=Pango.EllipsizeMode.END)
+        col.pack_start(icon, False)
+        col.pack_start(text, True)
+        col.add_attribute(icon, "pixbuf", 1)
+        col.add_attribute(text, "text", 0)
+        col.set_expand(True)
+        self.view.append_column(col)
+        for i, title in ((2, "Size"), (3, "Modified")):
+            self.view.append_column(Gtk.TreeViewColumn(title, Gtk.CellRendererText(), text=i))
+        scroll = Gtk.ScrolledWindow()
+        scroll.add(self.view)
+        paned.pack2(scroll, True, False)
+
+        self.status = theme.label("", "cidint-muted", 0.0)
+        self.status.set_margin_start(10)
+        self.status.set_margin_bottom(6)
+        root.pack_start(self.status, False, False, 2)
+
+        self.connect("key-press-event", self.on_key)
+        self.cwd = None
+        self.open(start)
+        self.show_all()
+
+    def text_button(self, text, tip, cb):
+        b = Gtk.Button(label=text)
+        b.set_tooltip_text(tip)
+        b.connect("clicked", cb)
+        return b
+
+    # ---- navigation ---------------------------------------------------
+    def open(self, path: str, remember: bool = True):
+        if path != TRASH and not os.path.isdir(path):
+            if path.startswith(HOME):
+                os.makedirs(path, exist_ok=True)  # standard folders on first use
+            else:
+                return self.error(f"{path} is not a folder")
+        if remember and self.cwd and self.cwd != path:
+            self.history.append(self.cwd)
+        self.cwd = path
+        self.refresh()
+
+    def refresh(self):
+        self.store.clear()
+        in_trash = self.cwd == TRASH
+        try:
+            if in_trash:
+                base = os.path.join(fileops.trash_dir(HOME), "files")
+                originals = dict(fileops.trash_entries(HOME))
+                entries = fileops.list_dir(base, True) if os.path.isdir(base) else []
+            else:
+                entries = fileops.list_dir(self.cwd, self.show_hidden)
+        except fileops.FileOpError as e:
+            return self.error(str(e))
+        for e in entries:
+            mod = time.strftime("%Y-%m-%d %H:%M", time.localtime(e.mtime))
+            size = "" if e.is_dir else fileops.human_size(e.size)
+            name = e.name + (f"   (from {originals.get(e.name, '?')})" if in_trash else "")
+            icon = self.pix["folder" if e.is_dir else "file"]
+            self.store.append([name, icon, size, mod, e.path, e.is_dir])
+        self.where.set_text("Trash" if in_trash else self.cwd)
+        self.back.set_sensitive(bool(self.history))
+        self.up.set_sensitive(not in_trash and self.cwd != "/")
+        for k in ("new", "rename", "copy", "cut", "paste", "trash"):
+            self.buttons[k].set_visible(not in_trash)
+        for k in ("restore", "empty"):
+            self.buttons[k].set_visible(in_trash)
+        free = fileops.human_size(fileops.free_space(HOME if in_trash else self.cwd))
+        self.status.set_text(f"{len(entries)} items   ·   {free} free")
+
+    def go_back(self, *_):
+        if self.history:
+            self.open(self.history.pop(), remember=False)
+
+    def go_up(self, *_):
+        if self.cwd != TRASH:
+            self.open(os.path.dirname(self.cwd.rstrip("/")) or "/")
+
+    def on_place(self, _box, row):
+        self.open(row.path)
+
+    def on_hidden(self, button):
+        self.show_hidden = button.get_active()
+        self.refresh()
+
+    def selected(self) -> list:
+        model, paths = self.view.get_selection().get_selected_rows()
+        return [model[p][4] for p in paths]
+
+    def on_activate(self, _view, path, _col):
+        row = self.store[path]
+        if row[5]:
+            if self.cwd != TRASH:
+                self.open(row[4])
+        elif fileops.is_text(row[4]):
+            self.show_text(row[4])
+        else:
+            self.error(f"No program in CIDINT OS can open '{os.path.basename(row[4])}' yet.")
+
+    def on_key(self, _w, ev):
+        ctrl = ev.state & Gdk.ModifierType.CONTROL_MASK
+        key = Gdk.keyval_name(ev.keyval)
+        actions = {"Delete": self.on_trash, "F2": self.on_rename, "F5": lambda *_: self.refresh(),
+                   "BackSpace": self.go_back}
+        if ctrl and key in ("c", "x", "v"):
+            {"c": self.on_copy, "x": self.on_cut, "v": self.on_paste}[key]()
+            return True
+        if key in actions and not isinstance(self.get_focus(), Gtk.Entry):
+            actions[key]()
+            return True
+        return False
+
+    # ---- actions --------------------------------------------------------
+    def ask(self, title: str, value: str = "") -> str:
+        d = Gtk.Dialog(title=title, transient_for=self, modal=True)
+        d.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "OK", Gtk.ResponseType.OK)
+        d.set_default_response(Gtk.ResponseType.OK)
+        entry = Gtk.Entry(text=value, activates_default=True)
+        box = d.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        box.add(theme.label(title))
+        box.add(entry)
+        d.show_all()
+        ok = d.run() == Gtk.ResponseType.OK
+        text = entry.get_text()
+        d.destroy()
+        return text if ok else ""
+
+    def confirm(self, text: str) -> bool:
+        d = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.WARNING,
+                              buttons=Gtk.ButtonsType.OK_CANCEL, text=text)
+        ok = d.run() == Gtk.ResponseType.OK
+        d.destroy()
+        return ok
+
+    def error(self, text: str):
+        d = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.INFO,
+                              buttons=Gtk.ButtonsType.CLOSE, text=text)
+        d.run()
+        d.destroy()
+
+    def guarded(self, func, *a):
+        try:
+            func(*a)
+        except fileops.FileOpError as e:
+            self.error(str(e))
+        self.refresh()
+
+    def on_new(self, *_):
+        name = self.ask("Name of the new folder", "New folder")
+        if name:
+            self.guarded(fileops.new_folder, self.cwd, name)
+
+    def on_rename(self, *_):
+        sel = self.selected()
+        if len(sel) != 1:
+            return self.error("Select one item to rename.")
+        name = self.ask("New name", os.path.basename(sel[0]))
+        if name:
+            self.guarded(fileops.rename, sel[0], name)
+
+    def on_copy(self, *_):
+        self.clip = (self.selected(), "copy")
+        self.status.set_text(f"{len(self.clip[0])} item(s) ready to paste")
+
+    def on_cut(self, *_):
+        self.clip = (self.selected(), "cut")
+        self.status.set_text(f"{len(self.clip[0])} item(s) ready to move")
+
+    def on_paste(self, *_):
+        paths, mode = self.clip
+        if not paths or self.cwd == TRASH:
+            return
+        if mode == "copy":
+            self.guarded(fileops.copy_into, paths, self.cwd)
+        else:
+            self.guarded(fileops.move_into, paths, self.cwd)
+            self.clip = ([], "copy")
+
+    def on_trash(self, *_):
+        sel = self.selected()
+        if sel and self.cwd != TRASH:
+            self.guarded(fileops.trash, sel, HOME)
+
+    def on_restore(self, *_):
+        for p in self.selected():
+            self.guarded(fileops.restore, os.path.basename(p), HOME)
+
+    def on_empty(self, *_):
+        if self.confirm("Delete everything in the trash for good? This cannot be undone."):
+            self.guarded(fileops.empty_trash, HOME)
+
+    def show_text(self, path: str):
+        win = Gtk.Window(title=os.path.basename(path), transient_for=self)
+        win.set_default_size(720, 520)
+        view = Gtk.TextView(editable=False, monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR)
+        with open(path, encoding="utf-8", errors="replace") as f:
+            view.get_buffer().set_text(f.read(2 * 1024 * 1024))
+        sc = Gtk.ScrolledWindow()
+        sc.add(view)
+        win.add(sc)
+        win.show_all()
+
+
+def main() -> int:
+    theme.apply()
+    start = sys.argv[1] if len(sys.argv) > 1 else HOME
+    Files(os.path.abspath(start))
+    Gtk.main()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

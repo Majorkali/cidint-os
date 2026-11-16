@@ -1,7 +1,10 @@
 #!/bin/sh
 # cidint-install - install CIDINT OS from the live medium onto a disk.
 #
-# Creates the CIDINT layout on the target disk (GPT, UEFI):
+# Creates the CIDINT layout on the target disk (GPT). The disk starts on
+# UEFI computers and, with GRUB in the BIOS boot partition, on computers
+# with legacy BIOS:
+#   5 bios-boot      1 MiB   GRUB core for legacy BIOS (first on the disk)
 #   1 esp          128 MiB   boot loader and kernel
 #   2 system-a    1024 MiB   read-only system image
 #   3 system-b    1024 MiB   reserved for A/B updates (left empty)
@@ -35,6 +38,7 @@ DRY=0
 ENCRYPT=0
 PASS_FILE=""
 ROOTPW_FILE=""
+USERPW_FILE=""
 KARGS=""
 MAPPER=cidint-data
 ERASE_EXISTING=0
@@ -50,7 +54,8 @@ Usage: $PROG --list
        $PROG --target /dev/DISK [--dry-run] [--erase-existing]
                     [--confirm-erase /dev/DISK] [--source DIR]
                     [--encrypt-data [--passphrase-file FILE]]
-                    [--root-password-file FILE] [--kernel-args "ARGS"]
+                    [--root-password-file FILE] [--user-password-file FILE]
+                    [--kernel-args "ARGS"]
 
   --list             show the disks that could be chosen; changes nothing
   --target DEV       whole disk to install to. ALL DATA ON IT IS ERASED.
@@ -66,6 +71,8 @@ Usage: $PROG --list
   --root-password-file F   root password of the installed system, from the
                      first line of F (required; asked for when interactive;
                      at least 8 characters)
+  --user-password-file F   password of the desktop user (Desktop Edition;
+                     required there, asked for when interactive)
   --kernel-args ARGS extra kernel arguments for the installed system
 EOF
 }
@@ -78,6 +85,7 @@ while [ $# -gt 0 ]; do
         --source) [ $# -ge 2 ] || { usage >&2; exit 2; }; SOURCE="$2"; shift ;;
         --passphrase-file) [ $# -ge 2 ] || { usage >&2; exit 2; }; PASS_FILE="$2"; shift ;;
         --root-password-file) [ $# -ge 2 ] || { usage >&2; exit 2; }; ROOTPW_FILE="$2"; shift ;;
+        --user-password-file) [ $# -ge 2 ] || { usage >&2; exit 2; }; USERPW_FILE="$2"; shift ;;
         --kernel-args) [ $# -ge 2 ] || { usage >&2; exit 2; }; KARGS="$2"; shift ;;
         --encrypt-data) ENCRYPT=1 ;;
         --dry-run) DRY=1 ;;
@@ -166,11 +174,31 @@ if [ -n "$(blkid -p -o value -s PTTYPE "$TARGET" 2>/dev/null || true)" ] || \
    [ -n "$(blkid -p -o value -s TYPE "$TARGET" 2>/dev/null || true)" ]; then
     HAS_CONTENT=1
 fi
+# What is on it now, in words, so the erase is a decision about real data.
+describe_disk() {
+    for part in "/sys/block/$NAME/$NAME"*; do
+        [ -e "$part" ] || continue
+        pn=$(basename "$part")
+        eval "$(blkid -p -o export "/dev/$pn" 2>/dev/null | grep -E '^(TYPE|LABEL|PART_ENTRY_NAME)=' | sed 's/^/B_/')" || true
+        size=$(( $(cat "$part/size") * 512 / 1048576 ))
+        what="${B_TYPE:-unknown or empty}"
+        case "${B_TYPE:-}" in
+            ntfs|BitLocker) what="$B_TYPE (probably Windows)" ;;
+            crypto_LUKS) what="encrypted volume (LUKS)" ;;
+            vfat) what="FAT (an EFI partition or a data partition)" ;;
+        esac
+        echo "    /dev/$pn  ${size} MiB  $what  ${B_LABEL:-}${B_PART_ENTRY_NAME:+ ($B_PART_ENTRY_NAME)}"
+        unset B_TYPE B_LABEL B_PART_ENTRY_NAME
+    done
+}
+
 if [ "$HAS_CONTENT" -eq 1 ] && [ "$ERASE_EXISTING" -ne 1 ]; then
+    echo "$TARGET currently holds:" >&2
+    describe_disk >&2
     refuse "$TARGET already contains a partition table or filesystem. Back up anything you need, then repeat with --erase-existing"
 fi
 
-DATA_MIB=$(( BYTES / 1048576 - 128 - 1024 - 1024 - 2 ))
+DATA_MIB=$(( BYTES / 1048576 - 2 - 128 - 1024 - 1024 - 2 ))
 
 # Secrets are checked before anything is erased.
 first_line() { IFS= read -r _l < "$1" || true; printf '%s' "$_l"; }
@@ -195,7 +223,13 @@ echo
 echo "Installation plan"
 echo "  source      : $SRC (system image $(( IMG_BYTES / 1048576 )) MiB)"
 echo "  target      : $TARGET  $(( BYTES / 1048576 )) MiB  $(disk_model "$NAME")"
-echo "  existing    : $([ "$HAS_CONTENT" -eq 1 ] && echo 'partitions or data present - WILL BE ERASED' || echo 'none detected')"
+if [ "$HAS_CONTENT" -eq 1 ]; then
+    echo "  existing    : EVERYTHING BELOW WILL BE ERASED"
+    describe_disk
+else
+    echo "  existing    : none detected"
+fi
+echo "  5 bios-boot      1 MiB  GRUB for legacy BIOS"
 echo "  1 esp          128 MiB  FAT32"
 echo "  2 system-a    1024 MiB  system image, mounted read-only"
 echo "  3 system-b    1024 MiB  empty, reserved for updates"
@@ -246,6 +280,23 @@ fi
 [ "${#ROOTPW}" -ge 8 ] || refuse "the root password must have at least 8 characters; nothing was changed"
 case "$ROOTPW" in *:*) refuse "the root password must not contain ':'; nothing was changed" ;; esac
 
+# Desktop Edition: the desktop user logs in at the login screen and needs
+# a password too. (The system being installed is the one running here.)
+DESKTOP_USERS=$(awk -F: '$1 == "cidint-desktop" { print $4 }' /etc/group | tr ',' ' ')
+USERPW=""
+if [ -n "$DESKTOP_USERS" ]; then
+    if [ -n "$USERPW_FILE" ]; then
+        [ -r "$USERPW_FILE" ] || fail "cannot read $USERPW_FILE"
+        USERPW=$(first_line "$USERPW_FILE")
+    else
+        [ "$INTERACTIVE" -eq 1 ] || refuse "no password for the desktop user given; use --user-password-file FILE"
+        echo "Choose the password of the desktop user ($DESKTOP_USERS), at least 8 characters."
+        ask_secret "Desktop user password"; USERPW=$SECRET
+    fi
+    [ "${#USERPW}" -ge 8 ] || refuse "the desktop user's password must have at least 8 characters; nothing was changed"
+    case "$USERPW" in *:*) refuse "the desktop user's password must not contain ':'; nothing was changed" ;; esac
+fi
+
 # ---- point of no return ---------------------------------------------------
 
 mkdir -p "$WORK"
@@ -265,15 +316,18 @@ case "$NAME" in
 esac
 
 say "partitioning $TARGET"
+# Partition numbers 1-4 stay as before (updates rely on them); the BIOS
+# boot partition is number 5 but sits first, in the space before the ESP.
 sfdisk --wipe always --wipe-partitions always "$TARGET" <<EOF
 label: gpt
-size=128MiB, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="esp"
-size=1024MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="system-a"
-size=1024MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="system-b"
-type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="cidint-data"
+${P}1 : start=4096, size=128MiB, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="esp"
+${P}2 : size=1024MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="system-a"
+${P}3 : size=1024MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="system-b"
+${P}4 : type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="cidint-data"
+${P}5 : start=2048, size=2048, type=21686148-6449-6E6F-744E-656564454649, name="bios-boot"
 EOF
 udevadm settle 2>/dev/null || sleep 3
-for n in 1 2 3 4; do
+for n in 1 2 3 4 5; do
     [ -b "${P}${n}" ] || fail "partition ${P}${n} did not appear"
 done
 
@@ -333,6 +387,14 @@ awk -F: -v OFS=: -v h="$HASH" '$1 == "root" { $2 = h } { print }' "$WORK/root/et
 cat "$WORK/shadow.new" > "$WORK/root/etc/shadow"
 rm -f "$WORK/shadow.new"
 grep -q '^root:\$6\$' "$WORK/root/etc/shadow" || fail "the root password was not stored as a hash"
+for u in $DESKTOP_USERS; do
+    say "setting the password of the desktop user $u"
+    HASH=$(printf '%s' "$USERPW" | openssl passwd -6 -stdin) || fail "could not hash the password"
+    awk -F: -v OFS=: -v u="$u" -v h="$HASH" '$1 == u { $2 = h } { print }' "$WORK/root/etc/shadow" > "$WORK/shadow.new"         || fail "could not prepare the password file"
+    cat "$WORK/shadow.new" > "$WORK/root/etc/shadow"
+    rm -f "$WORK/shadow.new"
+    grep -q "^$u:"'\$6\$' "$WORK/root/etc/shadow" || fail "the password of $u was not stored as a hash"
+done
 sync
 umount "$WORK/root"
 
@@ -357,17 +419,17 @@ grub-editenv "$WORK/esp/EFI/BOOT/grubenv" set slot=a || fail "could not write th
 cat > "$WORK/esp/EFI/BOOT/grub.cfg" <<EOF
 serial --unit=0 --speed=115200 --word=8 --parity=no --stop=1
 set slot=a
-load_env
+load_env -f /EFI/BOOT/grubenv
 set boot_slot="\$slot"
 if [ -n "\$trial" ]; then
     if [ "\$tried" = "1" ]; then
         set trial=
         set tried=
         set rolled_back=1
-        save_env trial tried rolled_back
+        save_env -f /EFI/BOOT/grubenv trial tried rolled_back
     else
         set tried=1
-        save_env tried
+        save_env -f /EFI/BOOT/grubenv tried
         set boot_slot="\$trial"
     fi
 fi
@@ -381,6 +443,12 @@ menuentry 'CIDINT OS (system slot B)' --id b {
     linux /bzImage-b root=PARTUUID=$UUID_B $ARGS cidint.slot=b
 }
 EOF
+# Legacy BIOS: GRUB's core goes into the BIOS boot partition and its
+# modules into /grub on the ESP; it reads the same menu as UEFI.
+say "installing the legacy BIOS boot loader"
+grub-install --target=i386-pc --boot-directory="$WORK/esp" --no-floppy "$TARGET"     || fail "could not install the legacy BIOS boot loader"
+printf '%s
+' '# Legacy BIOS start: the same menu and boot state as UEFI.' 'configfile /EFI/BOOT/grub.cfg'     > "$WORK/esp/grub/grub.cfg"
 sync
 umount "$WORK/esp"
 

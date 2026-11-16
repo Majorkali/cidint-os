@@ -1,0 +1,15 @@
+#!/bin/sh
+# Run as the session user before the compositor starts: standard folders
+# and this session's Weston configuration (with the user's background).
+set -eu
+: "${XDG_RUNTIME_DIR:?}" "${HOME:?}"
+for d in Documents Downloads Pictures .config/cidint; do
+    mkdir -p "$HOME/$d"
+done
+BG=image
+grep -qx 'background=plain' "$HOME/.config/cidint/appearance" 2>/dev/null && BG=plain
+if [ "$BG" = plain ]; then
+    sed -e '/^background-image=/d' -e '/^background-type=/d' /etc/cidint/weston.ini > "$XDG_RUNTIME_DIR/weston.ini"
+else
+    cp /etc/cidint/weston.ini "$XDG_RUNTIME_DIR/weston.ini"
+fi

@@ -1,0 +1,25 @@
+[Unit]
+Description=CIDINT login screen
+Documentation=https://github.com/Majorkali/cidint-os/blob/main/docs/STATUS.md
+Requires=seatd.service cidint-authd.service
+After=seatd.service cidint-authd.service systemd-user-sessions.service
+# Live media start the desktop directly; "cidint.nogui" keeps the console.
+ConditionKernelCommandLine=!cidint.mode=amnesic
+ConditionKernelCommandLine=!cidint.nogui
+
+[Service]
+User=cidint-greeter
+Group=cidint-greeter
+SupplementaryGroups=seat video input render
+RuntimeDirectory=cidint-greeter
+RuntimeDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/cidint-greeter
+Environment=LIBSEAT_BACKEND=seatd
+Environment=HOME=/run/cidint-greeter
+Environment=GDK_BACKEND=wayland
+ExecStart=/usr/bin/weston --config=/etc/cidint/weston-greeter.ini
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

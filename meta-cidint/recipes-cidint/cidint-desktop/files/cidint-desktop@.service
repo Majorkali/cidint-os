@@ -1,0 +1,28 @@
+[Unit]
+Description=CIDINT desktop session of %i
+Documentation=https://github.com/Majorkali/cidint-os/blob/main/docs/STATUS.md
+Requires=seatd.service cidint-authd.service
+After=seatd.service cidint-authd.service systemd-user-sessions.service home.mount cidint-data-setup.service
+# The login screen and a session never share the screen.
+Conflicts=cidint-greeter.service
+After=cidint-greeter.service
+# "cidint.nogui" on the kernel command line keeps the system on the console.
+ConditionKernelCommandLine=!cidint.nogui
+
+[Service]
+# The compositor and the programs of the session run as the user, not root.
+User=%i
+Group=%i
+SupplementaryGroups=seat video input render
+RuntimeDirectory=cidint-session-%i
+RuntimeDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/cidint-session-%i
+Environment=LIBSEAT_BACKEND=seatd
+Environment=HOME=/home/%i
+Environment=USER=%i
+Environment=GDK_BACKEND=wayland
+# /home lives on the data volume; create this user's directory there once.
+ExecStartPre=+/bin/sh -c 'mkdir -p /home/%i && chown %i:%i /home/%i && chmod 700 /home/%i'
+ExecStartPre=/usr/lib/cidint/desktop/cidint-session-setup
+ExecStart=/usr/bin/weston --config=/run/cidint-session-%i/weston.ini
+ExecStopPost=+/usr/lib/cidint/desktop/cidint-after-session

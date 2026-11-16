@@ -41,6 +41,9 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
+      - name: Desktop file operations (unit tests)
+        if: matrix.toolchain == 'stable'
+        run: python3 -m unittest discover -s tests/desktop -v
       - name: Crate list matches Cargo.lock
         run: python3 scripts/gen-crates-inc.py --check
       - name: CLI on real Linux

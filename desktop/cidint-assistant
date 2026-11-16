@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""cidint-assistant - ask the local AI engine questions.
+
+The answer is produced on this computer by the included small model (or
+one root added), inside a sandbox without network access. It can be
+wrong."""
+import sys
+
+sys.path.insert(0, "/usr/lib/cidint/desktop")
+import gi  # noqa: E402
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk  # noqa: E402
+
+from cidint_desktop import authclient, theme  # noqa: E402
+
+
+class Assistant(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Assistant")
+        self.set_default_size(760, 560)
+        self.connect("destroy", Gtk.main_quit)
+        hb = Gtk.HeaderBar(show_close_button=True)
+        hb.props.title = "Assistant"
+        hb.props.subtitle = "local AI, no network"
+        self.set_titlebar(hb)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=16)
+        self.add(box)
+        self.view = Gtk.TextView(editable=False, wrap_mode=Gtk.WrapMode.WORD_CHAR, cursor_visible=False)
+        self.view.set_left_margin(10)
+        self.view.set_right_margin(10)
+        self.buf = self.view.get_buffer()
+        self.buf.create_tag("you", weight=700, foreground="#2bd4e0")
+        self.buf.create_tag("ai", weight=700, foreground="#7ee2a8")
+        self.buf.create_tag("err", foreground="#ff8a80")
+        sc = Gtk.ScrolledWindow(vexpand=True)
+        sc.add(self.view)
+        box.pack_start(sc, True, True, 0)
+
+        row = Gtk.Box(spacing=8)
+        self.entry = Gtk.Entry(placeholder_text="Ask a question and press Enter")
+        self.entry.connect("activate", self.on_ask)
+        self.button = Gtk.Button(label="Ask")
+        self.button.get_style_context().add_class("suggested-action")
+        self.button.connect("clicked", self.on_ask)
+        row.pack_start(self.entry, True, True, 0)
+        row.pack_start(self.button, False, False, 0)
+        box.pack_start(row, False, False, 0)
+        box.pack_start(theme.label("Answers come from a small model running on this computer. "
+                                   "They can be wrong; check anything important.", "cidint-muted", wrap=True),
+                       False, False, 0)
+        self.show_all()
+        self.entry.grab_focus()
+
+    def say(self, who: str, tag: str, text: str):
+        end = self.buf.get_end_iter()
+        self.buf.insert_with_tags_by_name(end, who + "\n", tag)
+        self.buf.insert(self.buf.get_end_iter(), text.strip() + "\n\n")
+        self.view.scroll_to_iter(self.buf.get_end_iter(), 0.0, False, 0, 0)
+
+    def on_ask(self, *_):
+        q = self.entry.get_text().strip()
+        if not q:
+            return
+        self.entry.set_text("")
+        self.say("You", "you", q)
+        self.entry.set_sensitive(False)
+        self.button.set_sensitive(False)
+        self.button.set_label("Thinking…")
+
+        def done(res, err):
+            if err:
+                self.say("Assistant", "err", str(err).capitalize() + ".")
+            else:
+                self.say("Assistant", "ai", res.get("answer") or "(no answer)")
+            self.entry.set_sensitive(True)
+            self.button.set_sensitive(True)
+            self.button.set_label("Ask")
+            self.entry.grab_focus()
+
+        theme.run_async(lambda: authclient.request("ai_chat", timeout=660, question=q), done)
+
+
+def main() -> int:
+    theme.apply()
+    Assistant()
+    Gtk.main()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

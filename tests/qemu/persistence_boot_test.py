@@ -115,8 +115,8 @@ class Vm:
         self.autologin = False
         self.password_asked = False
         while True:
-            m = self.expect(r"(login: |Please enter passphrase for disk|Choose a root password[^:]*: "
-                            r"|Repeat the root password: |" + SHELL_PROMPT + ")", LOGIN_TIMEOUT)
+            m = self.expect(r"(login: |Please enter passphrase for disk|Choose a password for [\w-]+[^:\r\n]*: "
+                            r"|Repeat the password: |" + SHELL_PROMPT + ")", LOGIN_TIMEOUT)
             g = m.group(1)
             if g.startswith("root@"):
                 # A shell without a login prompt: a live medium's automatic
@@ -126,8 +126,8 @@ class Vm:
             if g.startswith("Choose") or g.startswith("Repeat"):
                 if g.startswith("Choose"):
                     self.first_start_prompts += 1
-                    if self.first_start_prompts > 3:
-                        raise RuntimeError("the first-start root password prompt repeated more than 3 times")
+                    if self.first_start_prompts > 4:
+                        raise RuntimeError("the first-start password prompt repeated more than 4 times")
                 time.sleep(1)
                 self.send(self.root_password)
                 continue
@@ -212,6 +212,7 @@ def main() -> int:
                     help="root password set at installation (or to give at the first-start prompt)")
     ap.add_argument("--expect-first-start", action="store_true",
                     help="a fresh disk image: the first start must ask for a root password")
+    ap.add_argument("--legacy-bios", action="store_true", help="start with SeaBIOS instead of UEFI")
     args = ap.parse_args()
     vmopts = {"passphrase": args.passphrase, "root_password": args.root_password}
 
@@ -233,9 +234,13 @@ def main() -> int:
         vm = None
         try:
             # ---- boot 1 -------------------------------------------------
-            vm = Vm(disk, args.ovmf_code, nvram, log, **vmopts)
+            fw = (None, None) if args.legacy_bios else (args.ovmf_code, nvram)
+            vm = Vm(disk, *fw, log, **vmopts)
             vm.login()
-            step("boot: image reaches a login prompt under UEFI", True)
+            step(f"boot: image reaches a login prompt under {'legacy BIOS' if args.legacy_bios else 'UEFI'}", True)
+            rc, out = vm.run("test -d /sys/firmware/efi && echo uefi || echo bios")
+            step("the system really started with the firmware under test",
+                 out == ("bios" if args.legacy_bios else "uefi"), out)
             if args.passphrase is not None:
                 step("encryption: the passphrase was asked for at boot", vm.unlock_prompts >= 1)
                 rc, out = vm.run("cryptsetup status cidint-data")
@@ -289,7 +294,7 @@ def main() -> int:
             vm.kill()
 
             # ---- boot 3 (after simulated power loss) --------------------
-            vm = Vm(disk, args.ovmf_code, nvram, log, **vmopts)
+            vm = Vm(disk, *fw, log, **vmopts)
             vm.login()
             rc, out = vm.run("cidint config get acceptance/before-power-cut --json")
             step("power loss: value committed before the cut is present",
@@ -300,6 +305,9 @@ def main() -> int:
             step("power loss: user file intact", rc == 0 and out == "cidint acceptance file", out)
             ok, out = system_state(vm)
             step("no failed units after recovery boot", ok, out)
+            rc, out = vm.run("cidint-hwcheck >/dev/null; f=$(ls -t /data/hwcheck/*.txt | head -n 1); "
+                             "grep -c '^== ' $f; grep '^boot mode' $f; grep '^PCI devices without' $f", timeout=120)
+            step("hardware report: written to /data/hwcheck with all sections", rc == 0 and out.startswith("9"), out)
 
             vm.send("systemctl poweroff")
             vm.wait_exit(180)

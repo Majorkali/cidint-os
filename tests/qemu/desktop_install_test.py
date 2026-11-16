@@ -55,11 +55,15 @@ def main() -> int:
             vm = Vm(args.image, args.ovmf_code, nvram, log, cdrom=True, extra_disk=disk)
             vm.login()
             step("boot: Desktop Edition live ISO with a blank disk reaches a shell", vm.autologin)
-            rc, out = vm.run("systemctl is-active cidint-desktop.service")
+            rc, out = vm.run("systemctl is-active cidint-desktop@cidint.service")
             step("the live session's desktop is running while installing", out == "active", out)
             vm.run(f"umask 077; echo '{TEST_ROOT_PASSWORD}' > /run/t-root")
             rc, out = vm.run("cidint-install --target /dev/sda --confirm-erase /dev/sda "
-                             "--root-password-file /run/t-root", timeout=1800)
+                             "--root-password-file /run/t-root </dev/null")
+            step("refuses to install the Desktop Edition without a desktop user password (exit 7)",
+                 rc == 7 and "desktop user" in out, out)
+            rc, out = vm.run("cidint-install --target /dev/sda --confirm-erase /dev/sda "
+                             "--root-password-file /run/t-root --user-password-file /run/t-root", timeout=1800)
             step("installation from the desktop live ISO completes", rc == 0 and "installation finished" in out, out)
             rc, out = vm.run("mkdir -p /run/t-root-a && mount -o ro /dev/sda2 /run/t-root-a && "
                              "ls /run/t-root-a/usr/bin/weston /run/t-root-a/usr/share/cidint/wallpaper.png; "

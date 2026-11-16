@@ -1,0 +1,10 @@
+[Unit]
+Description=CIDINT login and desktop service (privileged helper)
+After=local-fs.target
+
+[Service]
+# Needs root: it checks passwords, writes /etc/shadow and starts sessions.
+# Every request is checked against the caller's identity from the kernel.
+ExecStart=/usr/bin/python3 /usr/lib/cidint/desktop/cidint-authd
+Restart=on-failure
+RestrictAddressFamilies=AF_UNIX

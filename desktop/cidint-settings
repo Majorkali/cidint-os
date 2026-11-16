@@ -1,0 +1,280 @@
+#!/usr/bin/env python3
+"""cidint-settings - CIDINT OS settings.
+
+Every page shows values read from the running system, and every control
+does what it says. Pages: About, Network, Security, Updates, AI,
+Appearance, Account, Power."""
+import os
+import re
+import subprocess
+import sys
+
+sys.path.insert(0, "/usr/lib/cidint/desktop")
+import gi  # noqa: E402
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk  # noqa: E402
+
+from cidint_desktop import authclient, theme  # noqa: E402
+
+APPEARANCE = os.path.expanduser("~/.config/cidint/appearance")
+
+
+def read(path: str, default: str = "") -> str:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return default
+
+
+def cmd(*args, timeout: float = 20) -> str:
+    try:
+        r = subprocess.run(list(args), capture_output=True, text=True, timeout=timeout)
+        return (r.stdout + r.stderr).strip()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f"({args[0]} not available: {e})"
+
+
+def cmdline_value(key: str) -> str:
+    for tok in read("/proc/cmdline").split():
+        if tok.startswith(key + "="):
+            return tok.split("=", 1)[1]
+    return ""
+
+
+def os_release(key: str) -> str:
+    for line in read("/etc/os-release").splitlines():
+        if line.startswith(key + "="):
+            return line.split("=", 1)[1].strip().strip('"')
+    return ""
+
+
+def grid(rows) -> Gtk.Grid:
+    g = Gtk.Grid(column_spacing=24, row_spacing=10)
+    for i, (k, v) in enumerate(rows):
+        g.attach(theme.label(k, "cidint-key"), 0, i, 1, 1)
+        g.attach(theme.label(v, "", wrap=True, selectable=True), 1, i, 1, 1)
+    return g
+
+
+def page(title: str, *children) -> Gtk.ScrolledWindow:
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14, margin=28)
+    box.pack_start(theme.label(title, "cidint-h1"), False, False, 0)
+    for c in children:
+        box.pack_start(c, False, False, 0)
+    sc = Gtk.ScrolledWindow()
+    sc.add(box)
+    return sc
+
+
+def mono(text: str) -> Gtk.Label:
+    from gi.repository import GLib
+    lab = theme.label("", "", selectable=True)
+    lab.set_markup("<tt>" + GLib.markup_escape_text(text) + "</tt>")
+    return lab
+
+
+def about_page():
+    cpu = ""
+    for line in read("/proc/cpuinfo").splitlines():
+        if line.startswith("model name"):
+            cpu = line.split(":", 1)[1].strip()
+            break
+    cores = len(re.findall(r"^processor\s*:", read("/proc/cpuinfo"), re.M))
+    mem_kb = int((re.search(r"MemTotal:\s+(\d+)", read("/proc/meminfo")) or [0, "0"])[1])
+    mode = {"installed": "installed (data kept on the data volume)",
+            "amnesic": "live, amnesic (nothing is kept after shutdown)"}.get(cmdline_value("cidint.mode"), "unknown")
+    u = os.uname()
+    return page("About this system", grid([
+        ("System", os_release("PRETTY_NAME") or "CIDINT OS"),
+        ("Version", os_release("VERSION_ID")),
+        ("Mode", mode),
+        ("System slot", cmdline_value("cidint.slot") or "none (live medium)"),
+        ("Start-up firmware", "UEFI" if os.path.isdir("/sys/firmware/efi") else "legacy BIOS"),
+        ("Linux kernel", f"{u.release} ({u.machine})"),
+        ("Computer name", u.nodename),
+        ("Processor", f"{cpu or 'unknown'}, {cores} core(s)"),
+        ("Memory", f"{mem_kb / 1048576:.1f} GiB"),
+    ]), theme.label("CIDINT OS runs on the Linux kernel, which is developed by the Linux kernel "
+                    "community, not by the CIDINT OS project.", "cidint-muted", wrap=True))
+
+
+def network_page():
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+
+    def fill():
+        for c in box.get_children():
+            box.remove(c)
+        addrs = cmd("ip", "-o", "addr", "show")
+        rows = []
+        for dev in sorted(os.listdir("/sys/class/net")):
+            if dev == "lo":
+                continue
+            state = read(f"/sys/class/net/{dev}/operstate").strip()
+            mac = read(f"/sys/class/net/{dev}/address").strip()
+            kind = "wireless" if os.path.isdir(f"/sys/class/net/{dev}/wireless") else (
+                "network card" if os.path.exists(f"/sys/class/net/{dev}/device") else "virtual")
+            ips = [m.group(1) for m in re.finditer(rf"^\d+:\s+{re.escape(dev)}\s+inet6?\s+(\S+)", addrs, re.M)]
+            rows.append((dev, f"{kind}, {state}, {mac}\n" + (", ".join(ips) if ips else "no address")))
+        box.pack_start(grid(rows) if rows else theme.label("No network device found."), False, False, 0)
+        box.show_all()
+
+    refresh = Gtk.Button(label="Refresh")
+    refresh.connect("clicked", lambda *_: fill())
+    fill()
+    return page("Network", box, refresh,
+                theme.label("Incoming connections are refused by the firewall; outgoing ones are allowed.",
+                            "cidint-muted", wrap=True))
+
+
+def security_page():
+    fw = cmd("systemctl", "is-active", "cidint-firewall.service")
+    enc = os.path.exists("/etc/cidint/data-volume")
+    keys = len([k for k in os.listdir("/usr/share/cidint/keys/update")] if os.path.isdir("/usr/share/cidint/keys/update") else [])
+    return page("Security", grid([
+        ("Firewall", "on: incoming connections refused" if fw == "active" else f"NOT running ({fw})"),
+        ("Data volume", "encrypted (LUKS2), passphrase at every start" if enc else
+         ("in memory only (live medium)" if cmdline_value("cidint.mode") == "amnesic" else "NOT encrypted")),
+        ("System image", "read-only"),
+        ("Update signatures", f"required; {keys} trusted key(s)"),
+        ("AI engine", "runs without network access, cannot read your files"),
+    ]), theme.label("No system protects against everything. Keep your passphrase and passwords to yourself "
+                    "and keep backups of important files.", "cidint-muted", wrap=True))
+
+
+def updates_page():
+    out = cmd("cidint-slot", "status")
+    if "not started from an A/B system slot" in out:
+        out = "This system runs from a live medium. Updates apply to installed systems only."
+    return page("Updates", mono(out), theme.label(
+        "Updates are installed from a signed update directory with 'cidint-slot install DIR' "
+        "(as root, in a terminal). A new system is tried once and kept only if it starts correctly. "
+        "There is no update server yet.", "cidint-muted", wrap=True))
+
+
+def ai_page():
+    return page("AI engine", mono(cmd("cidint-ai", "status") + "\n\n" + cmd("cidint-ai", "models")),
+                theme.label("Ask questions in the Assistant. Answers come from a small model on this "
+                            "computer and can be wrong. More GGUF models can be added to "
+                            "/data/apps/ai/models by root.", "cidint-muted", wrap=True))
+
+
+def appearance_page():
+    current = "plain" if "background=plain" in read(APPEARANCE) else "image"
+    img = Gtk.RadioButton.new_with_label_from_widget(None, "CIDINT wallpaper")
+    plain = Gtk.RadioButton.new_with_label_from_widget(img, "Plain dark background")
+    (plain if current == "plain" else img).set_active(True)
+    note = theme.label("", "cidint-ok")
+
+    def save(button):
+        if not button.get_active():
+            return
+        os.makedirs(os.path.dirname(APPEARANCE), exist_ok=True)
+        tmp = APPEARANCE + ".new"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("background=%s\n" % ("plain" if button is plain else "image"))
+        os.replace(tmp, APPEARANCE)
+        note.set_text("Saved. The background changes at your next login.")
+
+    img.connect("toggled", save)
+    plain.connect("toggled", save)
+    return page("Appearance", theme.label("Desktop background", "cidint-key"), img, plain, note)
+
+
+def account_page():
+    user = os.environ.get("USER") or os.path.basename(os.path.expanduser("~"))
+    old, new, again = (Gtk.Entry(visibility=False, placeholder_text=t)
+                       for t in ("Current password", "New password (at least 8 characters)", "Repeat new password"))
+    status = theme.label("", "", wrap=True)
+    button = Gtk.Button(label="Change password")
+    button.get_style_context().add_class("suggested-action")
+
+    def done(_res, err):
+        button.set_sensitive(True)
+        ctx = status.get_style_context()
+        ctx.remove_class("cidint-ok")
+        ctx.remove_class("cidint-error")
+        if err:
+            ctx.add_class("cidint-error")
+            status.set_text(str(err).capitalize() + ".")
+        else:
+            ctx.add_class("cidint-ok")
+            status.set_text("Your password was changed.")
+            for e in (old, new, again):
+                e.set_text("")
+
+    def change(*_):
+        if new.get_text() != again.get_text():
+            status.set_text("The new passwords differ.")
+            return
+        button.set_sensitive(False)
+        status.set_text("Changing…")
+        o, n = old.get_text(), new.get_text()
+        theme.run_async(lambda: authclient.request("passwd", timeout=30, old=o, new=n), done)
+
+    button.connect("clicked", change)
+    return page("Account", grid([("User", user)]), old, new, again, button, status)
+
+
+def power_page():
+    status = theme.label("", "cidint-error", wrap=True)
+
+    def act(op, **kw):
+        try:
+            authclient.request(op, **kw)
+        except authclient.AuthError as e:
+            status.set_text(str(e).capitalize() + ".")
+
+    buttons = []
+    for text, op, kw, css in (("Log out", "logout", {}, ""), ("Restart", "power", {"action": "reboot"}, ""),
+                              ("Shut down", "power", {"action": "poweroff"}, "destructive-action")):
+        b = Gtk.Button(label=text)
+        if css:
+            b.get_style_context().add_class(css)
+        b.connect("clicked", lambda _b, op=op, kw=kw: act(op, **kw))
+        buttons.append(b)
+    row = Gtk.Box(spacing=10)
+    for b in buttons:
+        row.pack_start(b, False, False, 0)
+    return page("Power", row, status)
+
+
+class Settings(Gtk.Window):
+    def __init__(self, first: str):
+        super().__init__(title="Settings")
+        self.set_default_size(900, 600)
+        self.connect("destroy", Gtk.main_quit)
+        hb = Gtk.HeaderBar(show_close_button=True)
+        hb.props.title = "Settings"
+        self.set_titlebar(hb)
+        stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
+        for name, title, make in (("about", "About", about_page), ("network", "Network", network_page),
+                                  ("security", "Security", security_page), ("updates", "Updates", updates_page),
+                                  ("ai", "AI engine", ai_page), ("appearance", "Appearance", appearance_page),
+                                  ("account", "Account", account_page), ("power", "Power", power_page)):
+            try:
+                widget = make()
+            except Exception as e:  # show the problem instead of a blank window
+                widget = page(title, theme.label(f"This page could not be read: {e}", "cidint-error", wrap=True))
+            stack.add_titled(widget, name, title)
+        side = Gtk.StackSidebar(stack=stack)
+        side.set_size_request(180, -1)
+        box = Gtk.Box()
+        box.pack_start(side, False, False, 0)
+        box.pack_start(stack, True, True, 0)
+        self.add(box)
+        self.show_all()
+        if stack.get_child_by_name(first):
+            stack.set_visible_child_name(first)
+
+
+def main() -> int:
+    theme.apply()
+    Settings(sys.argv[1] if len(sys.argv) > 1 else "about")
+    Gtk.main()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

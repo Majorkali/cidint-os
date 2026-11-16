@@ -1,8 +1,10 @@
 #!/bin/sh
 # systemd generator: on a live medium (cidint.mode=amnesic) log root in
-# automatically on the local consoles. Live sessions keep nothing and root
-# has no password there; no network login service exists and inbound
-# connections are dropped by the firewall. Installed systems are untouched.
+# automatically on the local consoles, and on the Desktop Edition start the
+# desktop session of the user cidint without the login screen. Live sessions
+# keep nothing and have no passwords; no network login service exists and
+# inbound connections are dropped by the firewall. Installed systems are
+# untouched.
 set -eu
 out=${1:-/run/systemd/generator}
 
@@ -19,3 +21,11 @@ cat > "$out/getty@.service.d/cidint-live-autologin.conf" <<'EOF'
 ExecStart=
 ExecStart=-/sbin/agetty --noclear --autologin root %I $TERM
 EOF
+
+for dir in /usr/lib/systemd/system /lib/systemd/system; do
+    if [ -f "$dir/cidint-desktop@.service" ]; then
+        mkdir -p "$out/multi-user.target.wants"
+        ln -sf "$dir/cidint-desktop@.service" "$out/multi-user.target.wants/cidint-desktop@cidint.service"
+        break
+    fi
+done

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Run as root after a desktop session ended: show the login screen again,
+# unless the machine is shutting down or runs from a live medium.
+tr ' ' '\n' < /proc/cmdline | grep -qx 'cidint.mode=amnesic' && exit 0
+case "$(systemctl is-system-running 2>/dev/null)" in
+    stopping) exit 0 ;;
+esac
+systemctl --no-block start cidint-greeter.service
+exit 0

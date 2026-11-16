@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""cidint-greeter - the CIDINT OS login screen.
+
+Runs full screen as the unprivileged user cidint-greeter. The password is
+checked by cidint-authd, which then starts the user's session; this
+program never sees /etc/shadow.
+"""
+import grp
+import os
+import sys
+import time
+
+sys.path.insert(0, "/usr/lib/cidint/desktop")
+import gi  # noqa: E402
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import GLib, Gtk  # noqa: E402
+
+from cidint_desktop import authclient, theme  # noqa: E402
+
+
+def os_name() -> str:
+    try:
+        for line in open("/etc/os-release", encoding="utf-8"):
+            if line.startswith("PRETTY_NAME="):
+                return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return "CIDINT OS"
+
+
+class Greeter(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="CIDINT login")
+        self.get_style_context().add_class("cidint-greeter")
+        self.connect("destroy", Gtk.main_quit)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.get_style_context().add_class("cidint-greeter")
+        self.add(outer)
+
+        top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_top=60)
+        self.clock = theme.label("", "cidint-clock", 0.5)
+        self.date = theme.label("", "cidint-date", 0.5)
+        top.pack_start(self.clock, False, False, 0)
+        top.pack_start(self.date, False, False, 0)
+        outer.pack_start(top, False, False, 0)
+
+        centre = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        centre.set_halign(Gtk.Align.CENTER)
+        centre.set_valign(Gtk.Align.CENTER)
+        outer.pack_start(centre, True, True, 0)
+
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        card.get_style_context().add_class("cidint-card")
+        card.set_size_request(380, -1)
+        centre.pack_start(card, False, False, 0)
+        card.pack_start(theme.label("CIDINT OS", "cidint-title", 0.5), False, False, 0)
+        card.pack_start(theme.label("Intelligence Beyond Limits.", "cidint-sub", 0.5), False, False, 0)
+
+        users = []
+        try:
+            users = grp.getgrnam("cidint-desktop").gr_mem
+        except KeyError:
+            pass
+        self.user = Gtk.Entry(placeholder_text="User name")
+        self.user.set_text(users[0] if users else "")
+        self.password = Gtk.Entry(placeholder_text="Password")
+        self.password.set_visibility(False)
+        self.password.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+        self.password.connect("activate", self.on_login)
+        self.user.connect("activate", lambda *_: self.password.grab_focus())
+        card.pack_start(self.user, False, False, 4)
+        card.pack_start(self.password, False, False, 0)
+
+        self.button = Gtk.Button(label="Log in")
+        self.button.get_style_context().add_class("suggested-action")
+        self.button.connect("clicked", self.on_login)
+        card.pack_start(self.button, False, False, 6)
+        self.status = theme.label("", "cidint-error", 0.5, wrap=True)
+        card.pack_start(self.status, False, False, 0)
+
+        bottom = Gtk.Box(spacing=10, margin=24)
+        bottom.pack_start(theme.label(os_name(), "cidint-muted"), False, False, 0)
+        for text, action in (("Shut down", "poweroff"), ("Restart", "reboot")):
+            b = Gtk.Button(label=text)
+            b.connect("clicked", self.on_power, action)
+            bottom.pack_end(b, False, False, 0)
+        outer.pack_end(bottom, False, False, 0)
+
+        self.tick()
+        GLib.timeout_add_seconds(1, self.tick)
+        self.fullscreen()
+        self.show_all()
+        self.password.grab_focus()
+
+    def tick(self):
+        self.clock.set_text(time.strftime("%H:%M"))
+        self.date.set_text(time.strftime("%A, %d %B %Y"))
+        return True
+
+    def busy(self, on: bool):
+        for w in (self.user, self.password, self.button):
+            w.set_sensitive(not on)
+
+    def on_login(self, *_):
+        user, pw = self.user.get_text().strip(), self.password.get_text()
+        if not user or not pw:
+            self.status.set_text("Enter your user name and password.")
+            return
+        self.busy(True)
+        self.status.get_style_context().remove_class("cidint-error")
+        self.status.set_text("Checking…")
+
+        def done(_res, err):
+            if err is None:
+                self.status.get_style_context().add_class("cidint-ok")
+                self.status.set_text("Starting your session…")
+                return
+            self.password.set_text("")
+            self.status.get_style_context().add_class("cidint-error")
+            self.status.set_text(str(err).capitalize() + ".")
+            self.busy(False)
+            self.password.grab_focus()
+
+        theme.run_async(lambda: authclient.request("login", timeout=60, user=user, password=pw), done)
+
+    def on_power(self, _button, action):
+        try:
+            authclient.request("power", action=action)
+        except authclient.AuthError as e:
+            self.status.set_text(str(e).capitalize() + ".")
+
+
+def main() -> int:
+    os.environ.setdefault("GDK_BACKEND", "wayland")
+    theme.apply()
+    Greeter()
+    Gtk.main()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

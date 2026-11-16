@@ -131,17 +131,25 @@ def main() -> int:
                 vm.kill()
 
     if installed and all(r["passed"] for r in results):
-        sub = args.workdir / "installed"
-        proc = subprocess.run(
-            [sys.executable, str(HERE / "persistence_boot_test.py"), str(disk),
-             "--ovmf-code", str(args.ovmf_code), "--ovmf-vars", str(args.ovmf_vars),
-             "--workdir", str(sub), "--root-password", root_password]
-            + (["--passphrase", passphrase] if args.encrypt else []),
-            capture_output=True, text=True)
-        print(proc.stdout, end="")
-        print(proc.stderr, end="", file=sys.stderr)
-        step("installed system passes the boot, reboot and power-loss tests", proc.returncode == 0,
-             proc.stdout[-1500:])
+        # The same installed disk, started with UEFI and (each run works on
+        # its own copy) with legacy BIOS.
+        runs = [("installed", [], "UEFI")]
+        if not args.encrypt:
+            runs.append(("installed-bios", ["--legacy-bios"], "legacy BIOS"))
+        for name, extra_args, fw in runs:
+            sub = args.workdir / name
+            proc = subprocess.run(
+                [sys.executable, str(HERE / "persistence_boot_test.py"), str(disk),
+                 "--ovmf-code", str(args.ovmf_code), "--ovmf-vars", str(args.ovmf_vars),
+                 "--workdir", str(sub), "--root-password", root_password]
+                + (["--passphrase", passphrase] if args.encrypt else []) + extra_args,
+                capture_output=True, text=True)
+            print(proc.stdout, end="")
+            print(proc.stderr, end="", file=sys.stderr)
+            step(f"installed system passes the boot, reboot and power-loss tests ({fw})", proc.returncode == 0,
+                 proc.stdout[-1500:])
+            for big in sub.glob("*.wic"):
+                big.unlink()
 
     passed = all(r["passed"] for r in results)
     summary = {"image": str(args.image), "passed": passed, "results": results, "error": error}
